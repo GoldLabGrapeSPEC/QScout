@@ -42,8 +42,11 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingParameterString,
                        QgsWkbTypes,
                        QgsFields,
-                       QgsField)
-
+                       QgsField,
+                       QgsPoint,
+                       QgsFeature,
+                       QgsProject,
+                       QgsCoordinateTransform)
 
 class PinDropperAlgorithm(QgsProcessingAlgorithm):
     """
@@ -73,6 +76,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     POINT_INTERVAL_STDEV_INPUT = 'POINT_INTERVAL_STDEV_INPUT'
     OVERLAY_BOX_RADIUS_INPUT = 'OVERLAY_BOX_RADIUS_INPUT'
     FIELD_NAME_INPUT = 'FIELD_NAME_INPUT'
+
 
     def initAlgorithm(self, config):
         """
@@ -183,13 +187,27 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         Here is where the processing itself takes place.
         """
 
+        # declare algorithm parameters, mainly just so we have them all in on place
+        self._root = None
+        self._bound_box = None
+        self._defined_points = {}
+        self._loose_ends = None
+        self.row_h_geo_dx = 0
+        self.row_h_geo_dy = 0
+        self.row_h_geo_dx_stdev = 0
+        self.row_h_geo_dy_stdev = 0
+        self.col_w_geo_dx = 0
+        self.col_w_geo_dy = 0
+        self.col_w_geo_dx_stdev = 0
+        self.col_w_geo_dy_stdev = 0
+
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the procedxssAlgorithm function.
 
         # required parameters
         raster = self.parameterAsRasterLayer(parameters, self.RASTER_INPUT, context)
-        bound_box = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
+        self._bound_box = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
         overlay_box_radius = self.parameterAsInt(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
 
         # optional parameters
@@ -206,6 +224,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # get features from source
 
         out_fields = QgsFields()
+        # fields based on the rows1to10
         out_fields.append(QgsField(name='fid', type=QVariant.Int, len=6))
         out_fields.append(QgsField(name='org_fid', type=QVariant.Int, len=7))
         out_fields.append(QgsField(name='distance', type=QVariant.Double, len=18, prec=15))
@@ -213,47 +232,68 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         out_fields.append(QgsField(name='path', type=QVariant.String, len=62))
         out_fields.append(QgsField(name=field_name, type=QVariant.Double))
 
-        row_vector = list(row_vector.getFeatures())[0].geometry().asPolyline()
+        # x and y indexes
+        out_fields.append(QgsField(name='x_idx', type=QVariant.Int))
+        out_fields.append(QgsField(name='y_idx', type=QVariant.Int))
+
+        # convert row vector to the same CRS as the bounding box
+        row_vector_geom = list(row_vector.getFeatures())[0].geometry()
+        if row_vector.sourceCrs().authid() != self._bound_box.sourceCrs().authid():
+            transform_context = QgsProject.instance().transformContext()
+            # NOTE: there are two methods I could be using here: QgsVectorLayer.crs() and QgsVectorLayer.SourceCrs()
+            # I'm not sure which one is correct
+            coord_transformer = QgsCoordinateTransform(row_vector.crs(), self._bound_box.crs(), transform_context)
+            row_vector_geom = row_vector_geom.transform(coord_transformer)
+
+        row_vector = row_vector_geom.asPolyline()
         start = row_vector[0]
         stop = row_vector[len(row_vector)-1]
 
-        bound_box = list(bound_box.getFeatures())[0].geometry()[0]
+        self._bound_box = list(self._bound_box.getFeatures())[0].geometry()[0]
 
-        assert row_vector[0].within(bound_box)
+        assert self._bound_box.contains(row_vector[0])
 
         theta = math.atan(stop[1] - start[1], stop[0] - start[0])
-        row_h_dx = math.cos(theta) * row_h
-        row_h_dx_stdev = math.cos(theta) * row_h_stdev
-        row_h_dy = math.sin(theta) * row_h
-        row_h_dy_stdev = math.sin(theta) * row_h_stdev
-        col_w_dx = math.cos(theta) * point_interval
-        col_w_dx_stdev = math.cos(theta) * point_interval_stdev
-        col_w_dy = math.sin(theta) * point_interval
-        col_w_dy_stdev = math.sin(theta) * point_interval_stdev
+        self.row_h_geo_dx = math.cos(theta) * row_h
+        self.row_h_geo_dx_stdev = math.cos(theta) * row_h_stdev
+        self.row_h_geo_dy = math.sin(theta) * row_h
+        self.row_h_geo_dy_stdev = math.sin(theta) * row_h_stdev
+        self.col_w_geo_dx = math.cos(theta + math.pi / 2) * point_interval
+        self.col_w_geo_dx_stdev = math.cos(theta + math.pi / 2) * point_interval_stdev
+        self.col_w_geo_dy = math.sin(theta + math.pi / 2) * point_interval
+        self.col_w_geo_dy_stdev = math.sin(theta + math.pi / 2) * point_interval_stdev
 
 
-        (sink, dest_id) = self.parameterAsSink(
+        (self.sink, dest_id) = self.parameterAsSink(
             parameters,
             self.OUTPUT,
             context,
             fields=out_fields,
             geometryType=QgsWkbTypes.PointGeometry,
-            crs=bound_box.sourceCrs())
+            crs=self._bound_box.sourceCrs())
 
-        total_work_to_calc = bound_box.area() / ((row_h_dx + col_w_dx) * (row_h_dy + col_w_dy))
-        counter = 0
+        approx_total_calcs = self._bound_box.area() / ((self.row_h_geo_dx + self.col_w_geo_dx) * (self.row_h_geo_dy + self.col_w_geo_dy))
 
-        points_layout = PointsLayout(start)
+        # init self params
+        self._root = PinDropperPin(0, 0, None, -1)
+        self._root.drop_geolocation(*start)
+        self._loose_ends = start.adjs()
+        self.add_pin_to_sink(self._root)
 
-        while not self.is_complete(points_layout, bound_box):
+        while not self.is_complete():
             if feedback.isCanceled():
                 break
 
+            old_loose = {point: pin for point, pin in self.loose_ends}
+            self._loose_ends = {}
+            for loose_end in old_loose.values():
+                self.drop_pin(loose_end)
 
+            self.make_connections()
 
-            feedback.setProgress(int(100 * points_layout.population() / total_work_to_calc))
+            feedback.setProgress(int(100 * self.population() / approx_total_calcs))
 
-            if points_layout.population() > 2*total_work_to_calc:
+            if self.population() > 2 * approx_total_calcs:
                 # if the grid has been populated with twice as many points as predicted, something has gone wrong
                 break
 
@@ -305,15 +345,174 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     def createInstance(self):
         return PinDropperAlgorithm()
 
-    def is_complete(self, points, bounds):
+    # my functions
+    def is_complete(self):
+        return len(self.loose_ends) == 0
 
-    def itr(self):
-        pass
+    def drop_pin(self, point_candidate):
+        parent, relation = point_candidate.parent_relation()
+        # relation is from the child's POV, so if the parent is to the left of the child, it will be DIRECTION_LEFT
+        relation_tup = PinDropperPin.DIRECTIONS[reverse_direction(relation)]
+        tentitive_geo_x = parent.geoX() + relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
+        tentitive_geo_y = parent.geoY() + relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
 
-class PointsLayout:
-    def __init__(self, origin):
-        self.__population = 1
-        self.__origin = origin
+        if self._bound_box.contains(QgsPoint(tentitive_geo_x, tentitive_geo_y)):
+            # later, code will go here to make these geo_x and geo_y values less tentitive
+
+            point_candidate.drop_geolocation(tentitive_geo_x, tentitive_geo_y)
+            self._defined_points[point_candidate.coords_indexes()] = point_candidate
+            # add the point as a feature to the output
+            self.add_pin_to_sink(point_candidate)
+            new_loose_dict = point_candidate.loose_ends_dict()
+            self._loose_ends.update(
+                {p: new_loose_dict[p]
+                 for p in new_loose_dict
+                 if p not in self._loose_ends}
+            )  # avoid adding multiple loose ends for the same x,y pair
+        else:  # if the loose end is outside the bounds of the network, flag it as a dead end
+            point_candidate.status(PinDropperPin.STATUS_DEAD_END)
+
+    def make_connections(self):
+        loose_ends_temp = {point: self._loose_ends[point] for point in self._loose_ends}
+        for loose_end in loose_ends_temp:
+            # if there exists a defined point with the same coords as the loose end
+            if loose_end.coords_indexes() in self:
+                # merge the loose end
+                self[loose_end.coords_indexes()].merge_with_loose_end(loose_end)
+                self._loose_ends.pop(loose_end.coords_indexes())
+
+    def add_pin_to_sink(self, pin):
+        feat = QgsFeature(id=self.population() - 1)
+        feat.setGeometry(QgsPoint(pin.geoCoords()))
+        self._sink.addFeature(feat, QgsFeatureSink.FastInsert)
 
     def population(self):
-        return self.__population
+        return len(self._defined_points)
+
+    def __contains__(self, item):
+        return item in self._defined_points
+
+    def __getitem__(self, item):
+        assert isinstance(item, tuple)
+        assert len(item) == 2
+        assert item in self
+        return self._defined_points[item]
+
+
+
+class PinDropperPin:
+
+    STATUS_PIN = 0
+    STATUS_LOOSE_END = 1
+    STATUS_DEAD_END = 2
+
+    DIRECTION_LEFT = 0
+    DIRECTION_UP = 1
+    DIRECTION_RIGHT = 2
+    DIRECTION_DOWN = 3
+    NUM_DIRECTIONS = 4
+    DIRECTIONS = (
+        (1, 0),
+        (0, 1),
+        (-1, 0),
+        (0, -1)
+    )
+
+    def __init__(self, x_index, y_index, parent, origin):
+        # x and y are immutable
+        self._x_index = x_index
+        self._y_index = y_index
+        self._status = PinDropperPin.STATUS_LOOSE_END
+        self._geoX = None
+        self._geoY = None
+        self._adjs = [None for i in range(PinDropperPin.NUM_DIRECTIONS)]
+        if parent is not None: # parent will be none for the root pin
+            self._adjs[origin] = parent
+
+    def drop_geolocation(self, geoX, geoY):
+        self.geoX(geoX)
+        self.geoY(geoY)
+        self._status = PinDropperPin.STATUS_PIN
+
+        for i in range(PinDropperPin.NUM_DIRECTIONS):
+            if self._adjs[i] is None:
+                self._adjs[i] = PinDropperPin(self.x_index() + PinDropperPin.DIRECTIONS[i][0],
+                                              self.y_index() + PinDropperPin.DIRECTIONS[i][1],
+                                              self,
+                                              reverse_direction(i)
+                                              )
+
+    def parent_relation(self):
+        """
+        returns a tuple of the parent of this pin and its relation, assuming this pin is a loose end.
+        """
+        assert self._status == PinDropperPin.STATUS_LOOSE_END
+        i = filter(lambda x: self._adjs[x] is not None, range(PinDropperPin.NUM_DIRECTIONS))[0]
+        return self._adjs[i], i
+
+    def loose_ends(self):
+        return filter(lambda x: x.status() == PinDropperPin.STATUS_LOOSE_END, self.adjs())
+
+    def loose_ends_dict(self):
+        loose_ends = self.loose_ends()
+        return {x.coords_indexes(): x for x in loose_ends}
+
+    def status(self, new_status=-1):
+        """
+        retrieves or assigns pin status
+        """
+        if new_status > -1:
+            self._status = new_status
+        else:
+            return self._status
+
+    def x_index(self):
+        return self._x_index
+
+    def y_index(self):
+        return self.y_index
+
+    def coords_indexes(self):
+        return self.x_index, self.y_index
+
+    def left(self):
+        return self._adjs[PinDropperPin.DIRECTION_LEFT]
+
+    def up(self):
+        return self._adjs[PinDropperPin.DIRECTION_UP]
+
+    def right(self):
+        return self._adjs[PinDropperPin.DIRECTION_RIGHT]
+
+    def down(self):
+        return self._adjs[PinDropperPin.DIRECTION_DOWN]
+
+    def adjs(self):
+        return [pin for pin in self._adjs]  # copy, don't pass a reference to the list
+
+    def geoX(self, new_x=None):
+        if new_x is not None:
+            self._geoX = new_x
+        else:
+            return self._geoX
+
+    def geoY(self, new_y=None):
+        if new_y is not None:
+            self._geoY = new_y
+        else:
+            return self._geoY
+
+    def geoCoords(self):
+        return self._geoX(), self.geoY()
+
+    def merge_with_loose_end(self, loose_end):
+        assert self.status() == PinDropperPin.STATUS_PIN
+        assert loose_end.status() == PinDropperPin.STATUS_LOOSE_END
+        assert self.coords_indexes() == loose_end.coords_indexes()
+        loose_end_parent, loose_end_parent_rel = loose_end.parent_relation()
+        assert self._adjs[loose_end_parent_rel] is None
+        self._adjs[loose_end_parent_rel] = loose_end_parent
+
+
+def reverse_direction(direction):
+    return (direction + (PinDropperPin.NUM_DIRECTIONS / 2)) % PinDropperPin.NUM_DIRECTIONS
