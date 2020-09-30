@@ -30,17 +30,21 @@ __copyright__ = '(C) 2020 by Joshua Evans'
 
 __revision__ = '$Format:%H$'
 
-from qgis.PyQt.QtCore import QCoreApplication
+from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessing,
                        QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterFeatureSink,
                        QgsProcessingParameterRasterLayer,
-                       QgsProcessingParameterNumber)
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterString,
+                       QgsWkbTypes,
+                       QgsFields,
+                       QgsField)
 
 
-class pin_dropperAlgorithm(QgsProcessingAlgorithm):
+class PinDropperAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
     creates a new identical one.
@@ -67,6 +71,7 @@ class pin_dropperAlgorithm(QgsProcessingAlgorithm):
     POINT_INTERVAL_INPUT = 'POINT_INTERVAL_INPUT'
     POINT_INTERVAL_STDEV_INPUT = 'POINT_INTERVAL_STDEV_INPUT'
     OVERLAY_BOX_RADIUS_INPUT = 'OVERLAY_BOX_RADIUS_INPUT'
+    FIELD_NAME_INPUT = 'FIELD_NAME_INPUT'
 
     def initAlgorithm(self, config):
         """
@@ -91,12 +96,22 @@ class pin_dropperAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
+        # overlay box radius
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.OVERLAY_BOX_RADIUS_INPUT,
                 self.tr('Overlay Box Radius'),
                 minValue=0,
                 defaultValue=2
+            )
+        )
+
+        #field name
+        self.addParameter(
+            QgsProcessingParameterString(
+                self.FIELD_NAME_INPUT,
+                self.tr('Output Field Name'),
+                defaultValue="data"
             )
         )
 
@@ -141,13 +156,14 @@ class pin_dropperAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.POINT_INTERVAL_INPUT,
+                self.POINT_INTERVAL_STDEV_INPUT,
                 self.tr('Point Interval Stdev'),
                 type=QgsProcessingParameterNumber.Double,
                 minValue=0,
                 optional=True
             )
         )
+
 
 
         # We add a feature sink in which to store our processed features (this
@@ -169,25 +185,57 @@ class pin_dropperAlgorithm(QgsProcessingAlgorithm):
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.RASTER_INPUT, context)
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+
+        # required parameters
+        raster = self.parameterAsRasterLayer(parameters, self.RASTER_INPUT, context)
+        bound_box = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
+        overlay_box_radius = self.parameterAsInt(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
+
+        # optional parameters
+        row_vector = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
+        row_h = self.parameterAsDouble(parameters, self.ROW_HEIGHT_INPUT, context)
+        row_h_stdev = self.parameterAsDouble(parameters, self.ROW_HEIGHT_STDEV_INPUTINPUT, context)
+        point_interval = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
+        point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
+
+        field_name = self.parameterAsString(parameters, self.FIELD_NAME_INPUT, context)
+        print("Hello World")
 
         # Compute the number of steps to display within the progress bar and
         # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
 
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
-            if feedback.isCanceled():
-                break
+        out_fields = QgsFields()
+        out_fields.append(QgsField(name='fid', type=QVariant.Int, len=6))
+        out_fields.append(QgsField(name='org_fid', type=QVariant.Int, len=7))
+        out_fields.append(QgsField(name='distance', type=QVariant.Double, len=18, prec=15))
+        out_fields.append(QgsField(name='layer', type=QVariant.String, len=5))
+        out_fields.append(QgsField(name='path', type=QVariant.String, len=62))
+        out_fields.append(QgsField(name=field_name, type=QVariant.Double))
 
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
 
-            # Update the progress bar
-            feedback.setProgress(int(current * total))
+
+        (sink, dest_id) = self.parameterAsSink(
+            parameters,
+            self.OUTPUT,
+            context,
+            fields=out_fields,
+            geometryType=QgsWkbTypes.PointGeometry,
+            crs=bound_box.sourceCrs())
+
+        # features = bound_box.getFeatures()
+        #
+        #
+        #
+        # for current, feature in enumerate(features):
+        #     # Stop the algorithm if cancel button has been clicked
+        #     if feedback.isCanceled():
+        #         break
+        #
+        #     # Add a feature in the sink
+        #     sink.addFeature(feature, QgsFeatureSink.FastInsert)
+        #
+        #     # Update the progress bar
+        #     feedback.setProgress(int(current * total))
 
         # Return the results of the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
@@ -235,4 +283,4 @@ class pin_dropperAlgorithm(QgsProcessingAlgorithm):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return pin_dropperAlgorithm()
+        return PinDropperAlgorithm()
