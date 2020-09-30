@@ -30,6 +30,7 @@ __copyright__ = '(C) 2020 by Joshua Evans'
 
 __revision__ = '$Format:%H$'
 
+import math
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessing,
                        QgsFeatureSink,
@@ -115,16 +116,16 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
-        #optional parameters
-        #direction vector for rows
+        # direction vector for rows
         self.addParameter(
             QgsProcessingParameterFeatureSource(
                 self.ROW_VECTOR_INPUT,
                 self.tr('Row Vector'),
                 [QgsProcessing.TypeVectorLine],
-                optional=True
             )
         )
+
+        #optional parameters
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.ROW_HEIGHT_INPUT,
@@ -184,7 +185,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
+        # dictionary returned by the procedxssAlgorithm function.
 
         # required parameters
         raster = self.parameterAsRasterLayer(parameters, self.RASTER_INPUT, context)
@@ -212,6 +213,23 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         out_fields.append(QgsField(name='path', type=QVariant.String, len=62))
         out_fields.append(QgsField(name=field_name, type=QVariant.Double))
 
+        row_vector = list(row_vector.getFeatures())[0].geometry().asPolyline()
+        start = row_vector[0]
+        stop = row_vector[len(row_vector)-1]
+
+        bound_box = list(bound_box.getFeatures())[0].geometry()[0]
+
+        assert row_vector[0].within(bound_box)
+
+        theta = math.atan(stop[1] - start[1], stop[0] - start[0])
+        row_h_dx = math.cos(theta) * row_h
+        row_h_dx_stdev = math.cos(theta) * row_h_stdev
+        row_h_dy = math.sin(theta) * row_h
+        row_h_dy_stdev = math.sin(theta) * row_h_stdev
+        col_w_dx = math.cos(theta) * point_interval
+        col_w_dx_stdev = math.cos(theta) * point_interval_stdev
+        col_w_dy = math.sin(theta) * point_interval
+        col_w_dy_stdev = math.sin(theta) * point_interval_stdev
 
 
         (sink, dest_id) = self.parameterAsSink(
@@ -222,20 +240,22 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             geometryType=QgsWkbTypes.PointGeometry,
             crs=bound_box.sourceCrs())
 
-        # features = bound_box.getFeatures()
-        #
-        #
-        #
-        # for current, feature in enumerate(features):
-        #     # Stop the algorithm if cancel button has been clicked
-        #     if feedback.isCanceled():
-        #         break
-        #
-        #     # Add a feature in the sink
-        #     sink.addFeature(feature, QgsFeatureSink.FastInsert)
-        #
-        #     # Update the progress bar
-        #     feedback.setProgress(int(current * total))
+        total_work_to_calc = bound_box.area() / ((row_h_dx + col_w_dx) * (row_h_dy + col_w_dy))
+        counter = 0
+
+        points_layout = PointsLayout(start)
+
+        while not self.is_complete(points_layout, bound_box):
+            if feedback.isCanceled():
+                break
+
+
+
+            feedback.setProgress(int(100 * points_layout.population() / total_work_to_calc))
+
+            if points_layout.population() > 2*total_work_to_calc:
+                # if the grid has been populated with twice as many points as predicted, something has gone wrong
+                break
 
         # Return the results of the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
@@ -284,3 +304,16 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
     def createInstance(self):
         return PinDropperAlgorithm()
+
+    def is_complete(self, points, bounds):
+
+    def itr(self):
+        pass
+
+class PointsLayout:
+    def __init__(self, origin):
+        self.__population = 1
+        self.__origin = origin
+
+    def population(self):
+        return self.__population
