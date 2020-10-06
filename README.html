@@ -1,39 +1,69 @@
-<html>
-<body>
-<h3>Plugin Builder Results</h3>
+<!--<html>-->
+<!--<body>-->
+<!--<h3>Plugin Builder Results</h3>-->
 
-Congratulations! You just built a plugin for QGIS!<br/><br />
+<!--Congratulations! You just built a plugin for QGIS!<br/><br />-->
 
-<div id='help' style='font-size:.9em;'>
-Your plugin <b>PinDropper</b> was created in:<br>
-&nbsp;&nbsp;<b>/home/josh/AgriTech/Gold Lab/pin_dropper</b>
-<p>
-Your QGIS plugin directory is located at:<br>
-&nbsp;&nbsp;<b>/home/josh/.local/share/QGIS/QGIS3/profiles/default/python/plugins</b>
-<p>
-<h3>What's Next</h3>
-<ol>
-    <li>Test the generated sources using <b>make test</b> (or run tests from your IDE)
-    <li>Copy the entire directory containing your new plugin to the QGIS plugin directory (see Notes below)
-    <li>Test the plugin by enabling it in the QGIS plugin manager and enabling the provider in the Processing Options
-    <li>Customize it by editing the implementation file <b>pin_dropper_algorithm.py</b>
-</ol>
-Notes:
-<ul>
-    <li>You can use the <b>Makefile</b> to compile and deploy when you
-        make changes. This requires GNU make (gmake). The Makefile is ready to use, however you 
-        will have to edit it to add addional Python source files, dialogs, and translations.
-    <li>You can also use <b>pb_tool</b> to compile and deploy your plugin. Tweak the <i>pb_tool.cfg</i> file included with your plugin as you add files. Install <b>pb_tool</b> using 
-        <i>pip</i> or <i>easy_install</i>. See <b>http://loc8.cc/pb_tool</b> for more information.
-</ul>
-</div>
-<div style='font-size:.9em;'>
-<p>
-For information on writing PyQGIS code, see <b>http://loc8.cc/pyqgis_resources</b> for a list of resources.
-</p>
-</div>
-<p>
-&copy;2011-2018 GeoApt LLC - geoapt.com 
-</p>
-</body>
-</html>
+<!--<div id='help' style='font-size:.9em;'>-->
+<!--Your plugin <b>PinDropper</b> was created in:<br>-->
+<!--&nbsp;&nbsp;<b>/home/josh/AgriTech/Gold Lab/pin_dropper</b>-->
+<!--<p>-->
+<!--Your QGIS plugin directory is located at:<br>-->
+<!--&nbsp;&nbsp;<b>/home/josh/.local/share/QGIS/QGIS3/profiles/default/python/plugins</b>-->
+<!--<p>-->
+<!--<h3>What's Next</h3>-->
+<!--<ol>-->
+<!--    <li>Test the generated sources using <b>make test</b> (or run tests from your IDE)-->
+<!--    <li>Copy the entire directory containing your new plugin to the QGIS plugin directory (see Notes below)-->
+<!--    <li>Test the plugin by enabling it in the QGIS plugin manager and enabling the provider in the Processing Options-->
+<!--    <li>Customize it by editing the implementation file <b>pin_dropper_algorithm.py</b>-->
+<!--</ol>-->
+<!--Notes:-->
+<!--<ul>-->
+<!--    <li>You can use the <b>Makefile</b> to compile and deploy when you-->
+<!--        make changes. This requires GNU make (gmake). The Makefile is ready to use, however you -->
+<!--        will have to edit it to add addional Python source files, dialogs, and translations.-->
+<!--    <li>You can also use <b>pb_tool</b> to compile and deploy your plugin. Tweak the <i>pb_tool.cfg</i> file included with your plugin as you add files. Install <b>pb_tool</b> using -->
+<!--        <i>pip</i> or <i>easy_install</i>. See <b>http://loc8.cc/pb_tool</b> for more information.-->
+<!--</ul>-->
+<!--</div>-->
+<!--<div style='font-size:.9em;'>-->
+<!--<p>-->
+<!--For information on writing PyQGIS code, see <b>http://loc8.cc/pyqgis_resources</b> for a list of resources.-->
+<!--</p>-->
+<!--</div>-->
+<!--<p>-->
+<!--&copy;2011-2018 GeoApt LLC - geoapt.com -->
+<!--</p>-->
+<!--</body>-->
+<!--</html>-->
+Algorithm Parameters:
+
+Basic parameters
+OUTPUT: the layer that the program will output geometry to. leave blank to generate a new layer
+BOUND_BOX_INPUT: a layer containing a polygon that the program will drop pins within
+RASTER_INPUT: the input raster for the program. IMPORTANT: the input raster must have the same CRS as the bounding box
+
+Parameters describing the basic geography of the field
+ROW_VECTOR_INPUT: a direction vector, which the program takes in the form of a line, representing a row in the field.
+The first point in the line is the start point for the field, so this is also implicitly a position vector. Don't
+overthink this just find a place where the raster is a clear pattern and draw a line along a row. If the CRS is
+different from BOUND_BOX_INPUT it will be automatically converted.
+ROW_HEIGHT_INPUT: the distance between two rows, in the units of the CRS used by BOUND_BOX_INPUT
+ROW_HEIGHT_STDEV_INPUT: the standard deviation of the row height values. The program will assume a gaussian distribution
+and look within three standard deviations.
+POINT_INTERVAL_INPUT: the interval between points on a row. (TODO: rename this?). Functions similar to row height.
+POINT_INTERVAL_STDEV_INPUT: the standard deviation of the interval between points on a row. The program will assume a
+gaussian distribution and look within three standard deviations.
+
+Parameters for overlay comparisons
+OVERLAY_BOX_RADIUS_INPUT: the radius of the box that the program will use for its comparisons, in field units
+(i.e. the height and interval values specified in the above section). Defaults to 2, which means 2 units AROUND the spot
+where the program is considering dropping a pin.
+OVERLAY_BOX_SAMPLING_INPUT: the number of times to sample the raster per field unit. Default value is 32, so for the
+default OVERLAY_BOX_RADIUS_INPUT value of 2, that means ((2*2+1)*32)^2 samples per overlay box
+OVERLAY_MATCH_THRESHOLD: the threshold at which to declare an overlay box a match and drop a pin. I'm still figuring
+this one out tbh
+
+Cosmetic parameters:
+FIELD_NAME_INPUT: the thing to name the field where the program puts the output data. Defaults to 'data'.
