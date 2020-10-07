@@ -51,11 +51,13 @@ from qgis.core import (QgsProcessing,
                        QgsFields,
                        QgsField,
                        QgsFeature,
+                       QgsGeometry,
                        QgsProject,
                        QgsCoordinateTransform,
                        QgsPoint,
                        QgsPointXY,
-                       QgsRectangle
+                       QgsRectangle,
+                       QgsVectorLayer
                        # QgsRasterPipe,
                        # QgsRasterFileWriter,
                        )
@@ -266,12 +268,10 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._loose_ends = None
         self.row_h_geo_dx = 0
         self.row_h_geo_dy = 0
-        self.row_h_geo_dx_stdev = 0
-        self.row_h_geo_dy_stdev = 0
         self.col_w_geo_dx = 0
         self.col_w_geo_dy = 0
-        self.col_w_geo_dx_stdev = 0
-        self.col_w_geo_dy_stdev = 0
+        self.col_w_stdev = .1
+        self.row_h_stdev = .1
         self.overlay_box_radius = 0
 
         # read parameters
@@ -292,9 +292,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
         self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
         self.assume_empties = self.parameterAsBool(parameters, self.ASSUME_EMPTIES_INPUT, context)
-        assert (row_h_stdev is None) == (point_interval_stdev is None), "Both row height and row point interval" \
-                                                                        "standard deviations should be specified, or" \
-                                                                        "neither."
 
         assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
 
@@ -348,22 +345,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.row_h_geo_dy = math.sin(theta) * self.row_h
         self.col_w_geo_dx = math.cos(theta + math.pi / 2) * self.col_w
         self.col_w_geo_dy = math.sin(theta + math.pi / 2) * self.col_w
-        if row_h_stdev is not None:
-            self.row_h_geo_dx_stdev = math.cos(theta) * row_h_stdev
-            self.row_h_geo_dy_stdev = math.sin(theta) * row_h_stdev
-            self.col_w_geo_dx_stdev = math.cos(theta + math.pi / 2) * point_interval_stdev
-            self.col_w_geo_dy_stdev = math.sin(theta + math.pi / 2) * point_interval_stdev
-        else:
-            # if stddev is not specified, assume a stddev of 10%
-            self.row_h_geo_dx_stdev = 0.1 * self.row_h_geo_dx
-            self.row_h_geo_dy_stdev = 0.1 * self.row_h_geo_dy
-            self.col_w_geo_dx_stdev = 0.1 * self.col_w_geo_dx
-            self.col_w_geo_dy_stdev = 0.1 * self.col_w_geo_dy
-
+        if row_h_stdev > 0:
+            self.row_h_stdev = row_h_stdev / self.row_h
+        if point_interval_stdev > 0:
+            self.col_w_stdev = point_interval_stdev / self.col_w
 
         # init self params
         self._root = PinDropperPin(0, 0, None, -1)
         self._root.drop_geolocation(*start)
+        self._defined_points[self._root.coords_indexes()] = self._root
         self._loose_ends = self._root.loose_ends_dict()
 
         ds = gdal.Open(self.raster.dataProvider().dataSourceUri())
@@ -481,6 +471,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         approx_geo_x = parent.geoX() + relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
         approx_geo_y = parent.geoY() + relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
 
+        dbg_lr = QgsVectorLayer(baseName=str(point_candidate.coords_indexes())+"_search_boxes")
+        QgsProject.instance().addMapLayer(dbg_lr)
+
         # ignore values with approximate values outside the bounding box
         if self._bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
             print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
@@ -533,9 +526,11 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             self.radius = idx_radius
             self.geo_center = geo_center
             # row_idx_coords = index within row, so x
-            self.row_idx_coords = np.arange(-idx_radius, idx_radius, 2 * idx_radius / context.search_iter_size)
+            w_rad = idx_radius * context.col_w_stdev
+            self.row_idx_coords = np.arange(-w_rad, w_rad, 2 * w_rad / context.search_iter_size)
             # col_idx_coords = index within a column, so y
-            self.col_idx_coords = np.arange(-idx_radius, idx_radius, 2 * idx_radius / context.search_iter_size)
+            h_rad = idx_radius * context.row_h_stdev
+            self.col_idx_coords = np.arange(-h_rad, h_rad, 2 * h_rad / context.search_iter_size)
             self.x_geo_coords = geo_center[0] + self.row_idx_coords * context.col_w_geo_dx + self.col_idx_coords * context.row_h_geo_dx
             self.y_geo_coords = geo_center[1] + self.row_idx_coords * context.col_w_geo_dy + self.col_idx_coords * context.row_h_geo_dy
             self.box_coords_list = itertools.product(self.x_geo_coords, self.y_geo_coords)
@@ -573,14 +568,21 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         assert iters >= 0
         best_match = 0
         best_coords = None
+
         for geo_x, geo_y in search_box.coords_list():
             if ignore_search_box is not None and ignore_search_box.within(geo_x, geo_y):
                 continue
+
+            # feet = QgsFeature()
+            # feet.setGeometry(QgsPoint(geo_x, geo_y))
+            # self._sink.addFeature(feet)
+
             compare = self.sample(geo_x, geo_y)
             match = self.rate_offset_match(target, compare)
             if match > best_match:
                 best_match = match
                 best_coords = (geo_x, geo_y)
+
         if iters == 0:
             return best_coords, best_match
         else:
@@ -597,7 +599,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         difference = np.abs(compare-target)
         avg_difference = np.mean(difference)
         rating = 1.0 - avg_difference / 255
-        # print(rating)
         return rating
 
     def sample(self, center_geo_x, center_geo_y):
