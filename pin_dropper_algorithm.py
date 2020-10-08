@@ -362,6 +362,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             for band
             in range(self.raster.dataProvider().bandCount())
         ], axis=-1)
+
+        self.band_ranges = np.stack([
+            np.amin(self.raster_data, axis=tuple(range(len(self.raster_data.shape)-1))),
+            np.amax(self.raster_data, axis=tuple(range(len(self.raster_data.shape)-1)))
+        ], axis=-1)
+
+        blank_axes = self.band_ranges[:,0] != self.band_ranges[:,1]
+        self.raster_data = self.raster_data[:, :, blank_axes]
+        self.band_ranges = self.band_ranges[blank_axes, :]
         del ds  # save memory
 
         approx_total_calcs = self._bound_box.area() / ((self.row_h_geo_dx + self.col_w_geo_dx) * (self.row_h_geo_dy + self.col_w_geo_dy))
@@ -371,8 +380,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         print("Debug log begin")
         itercount = 0
         # for debugging, you can change this value to have the algorithm stop before it's technically done
-        # max_points = approx_total_calcs * 2
-        max_points = 200
+        max_points = approx_total_calcs * 2
+        # max_points = 200
         while not self.is_complete() and self.population() < max_points:
             feedback.pushInfo("Iteration %d: %d loose ends" % (itercount, len(self._loose_ends)))
             t_iter_begin = time()
@@ -471,35 +480,44 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         approx_geo_x = parent.geoX() + relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
         approx_geo_y = parent.geoY() + relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
 
-        dbg_lr = QgsVectorLayer(baseName=str(point_candidate.coords_indexes())+"_search_boxes")
-        QgsProject.instance().addMapLayer(dbg_lr)
-
         # ignore values with approximate values outside the bounding box
         if self._bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
-            print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
-            target = self.sample(parent.geoX(), parent.geoY())
-            point, rating = self.search(target, approx_geo_x, approx_geo_y)
-            if rating >= self.overlay_match_min_threshold:
-                geo_x, geo_y = point
-            if rating < self.overlay_match_min_threshold and self.assume_empties:
-                geo_x, geo_y = approx_geo_x, approx_geo_y
-            if rating >= self.overlay_match_min_threshold or self.assume_empties:
-                point_candidate.drop_geolocation(geo_x, geo_y)
-                self._defined_points[point_candidate.coords_indexes()] = point_candidate
-                new_loose_dict = point_candidate.loose_ends_dict()
-                self._loose_ends.update(
-                    {p: new_loose_dict[p]
-                     for p in new_loose_dict
-                     if p not in self._loose_ends}
-                    )  # avoid adding multiple loose ends for the same x,y pair
-                return True
-            else:
-                # flag pin as hole TODO: figure out hole handling!
+            if self.near_border(approx_geo_x, approx_geo_y):
                 point_candidate.status(PinDropperPin.STATUS_HOLE)
                 return False
+            else:
+                # print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
+                target = self.sample(parent.geoX(), parent.geoY())
+                point, rating = self.search(target, approx_geo_x, approx_geo_y)
+                if rating >= self.overlay_match_min_threshold:
+                    geo_x, geo_y = point
+                if rating < self.overlay_match_min_threshold and self.assume_empties:
+                    geo_x, geo_y = approx_geo_x, approx_geo_y
+                if rating >= self.overlay_match_min_threshold or self.assume_empties:
+                    point_candidate.drop_geolocation(geo_x, geo_y)
+                    self._defined_points[point_candidate.coords_indexes()] = point_candidate
+                    new_loose_dict = point_candidate.loose_ends_dict()
+                    self._loose_ends.update(
+                        {p: new_loose_dict[p]
+                         for p in new_loose_dict
+                         if p not in self._loose_ends}
+                        )  # avoid adding multiple loose ends for the same x,y pair
+                    return True
+                else:
+                    # flag pin as hole TODO: figure out hole handling!
+                    point_candidate.status(PinDropperPin.STATUS_HOLE)
+                    return False
         else:  # if the loose end is outside the bounds of the network, flag it as a dead end
             point_candidate.status(PinDropperPin.STATUS_DEAD_END)
             return False
+
+    def near_border(self, x, y):
+        '''
+
+        '''
+        pline = QgsGeometry.fromPolylineXY(self._bound_box.asPolygon()[0])
+        distance = pline.shortestLine(QgsGeometry.fromPointXY(QgsPointXY(x, y))).length()
+        return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2))
 
     def make_connections(self):
         '''
@@ -545,6 +563,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         def subsearch(self, center, denominator, context):
             return PinDropperAlgorithm.SearchBox(self.radius / denominator, center, context)
 
+        def __len__(self):
+            return len(self.x_geo_coords) * len(self.y_geo_coords)
+
     def search(self, target_pattern, center_geo_x, center_geo_y):
         '''
         searches for a match of target_pattern around center_geo_x,center_geo_y
@@ -554,7 +575,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         for search_level in range(1, 4):
             if search_level > 1:
                 old_search_box = search_box
-            print("searching area around %f, %f at radius of %d standard deviations" % (center_geo_x, center_geo_y, search_level))
+            # print("searching area around %f, %f at radius of %d standard deviations" % (center_geo_x, center_geo_y, search_level))
             search_box = PinDropperAlgorithm.SearchBox(search_level, (center_geo_x, center_geo_y), self)
             point, rating = self.search_area(target_pattern, search_box, old_search_box, self.search_iter_count)
             if rating > self.overlay_match_min_threshold:
@@ -573,17 +594,14 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             if ignore_search_box is not None and ignore_search_box.within(geo_x, geo_y):
                 continue
 
-            # feet = QgsFeature()
-            # feet.setGeometry(QgsPoint(geo_x, geo_y))
-            # self._sink.addFeature(feet)
-
             compare = self.sample(geo_x, geo_y)
+
             match = self.rate_offset_match(target, compare)
             if match > best_match:
                 best_match = match
                 best_coords = (geo_x, geo_y)
 
-        if iters == 0:
+        if best_coords is None or iters == 0:
             return best_coords, best_match
         else:
             return self.search_area(target, search_box.subsearch(best_coords, 2, self), ignore_search_box, iters-1)
@@ -596,9 +614,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         @param compare the matrix to check if it matches target
         @return a value from 0 to 1, where 0 is no match and 1 is 100% match
         '''
+        if target.shape != compare.shape:
+            return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
+                        # out the problem
         difference = np.abs(compare-target)
-        avg_difference = np.mean(difference)
-        rating = 1.0 - avg_difference / 255
+        norm_diff = np.stack([difference[:,:,n] / (self.band_ranges[n, 1] - self.band_ranges[n, 0])
+                              for n
+                              in range(difference.shape[2])], axis=-1)
+        avg_difference = np.mean(norm_diff)
+        rating = 1.0 - avg_difference
         return rating
 
     def sample(self, center_geo_x, center_geo_y):
