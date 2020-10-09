@@ -283,7 +283,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.col_w_stdev = .1
         self.row_h_stdev = .1
         self.overlay_box_radius = 0
-
+        self.coords_mins = None
+        self.coords_maxs = None
         # read parameters
 
         # required parameters
@@ -340,15 +341,13 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         assert self.raster.crs().authid() == self._bound_box.crs().authid(), "Raster layer must have same CRS " \
                                                                              "as bounds vectory layer."
-        self.raster.dataProvider()
-
         row_vector = row_vector_geom.asMultiPolyline()[0]
         start = row_vector[0]
         stop = row_vector[len(row_vector)-1]
 
         self._bound_box = list(self._bound_box.getFeatures())[0].geometry()
 
-        assert self._bound_box.contains(row_vector[0])
+        assert self._bound_box.contains(row_vector[0]), "Row vector should be within the bounding box."
 
         theta = math.atan2(stop[1] - start[1], stop[0] - start[0])
 
@@ -361,11 +360,12 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         if point_interval_stdev > 0:
             self.col_w_stdev = point_interval_stdev / self.col_w
 
+        assert not self.near_border((0, 0), *start), "Row vector should not be near the edge of the bounding box."
+
         # init self params
         self._root = PinDropperPin(0, 0, None, -1)
-        self._root.drop_geolocation(*start)
-        self._defined_points[self._root.coords_indexes()] = self._root
-        self._loose_ends = self._root.loose_ends_dict()
+        self._loose_ends = {}
+        self.drop_pin_at(self._root, *start)
 
         ds = gdal.Open(self.raster.dataProvider().dataSourceUri())
         self.raster_data = np.stack([
@@ -379,7 +379,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             np.amax(self.raster_data, axis=tuple(range(len(self.raster_data.shape)-1)))
         ], axis=-1)
 
-        blank_axes = self.band_ranges[:,0] != self.band_ranges[:,1]
+        blank_axes = self.band_ranges[:, 0] != self.band_ranges[:, 1]
         self.raster_data = self.raster_data[:, :, blank_axes]
         self.band_ranges = self.band_ranges[blank_axes, :]
         del ds  # save memory
@@ -403,11 +403,22 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                 if feedback.isCanceled():
                     break
                 success = self.drop_pin(loose_end)
-                feedback.pushInfo("Tried to drop pin at coords (%d, %d) - %s" %
-                                  (loose_end.x_index(), loose_end.y_index(), ("success" if success else "failure")))
+                # feedback.pushInfo("Tried to drop pin at coords (%d, %d) - %s" %
+                #                   (loose_end.x_index(), loose_end.y_index(), ("success" if success else "failure")))
                 pins_dropped = pins_dropped + 1
             feedback.pushInfo("Checked %d pins in %f seconds!" % (pins_dropped, time() - t_iter_begin))
-            self.make_connections()
+
+            # find "loose ends" that are actually defined points and merge them out
+            loose_end_coords = list(self._loose_ends.keys())
+            for coords in loose_end_coords:
+                # if there exists a defined point with the same coords as the loose end
+                if coords in self:
+                    # merge the loose end
+                    self[coords].merge_with_loose_end(self._loose_ends[coords])
+                    self._loose_ends.pop(coords)
+
+            self.coords_mins = np.amin(np.stack(self._defined_points.keys(), -1), 1)
+            self.coords_maxs = np.amax(np.stack(self._defined_points.keys(), -1), 1)
 
             itercount = itercount + 1
 
@@ -416,7 +427,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         # read values from source csv file
         # (for now generate random values from 1 to 5)
-        values = {coords: randint(1, 5) for coords in self._defined_points}
 
         attrs = np.array([[*coords, randint(1, 5)] for coords in self._defined_points])
 
@@ -489,18 +499,24 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         parent, relation = point_candidate.parent_relation()
         # relation is from the child's POV, so if the parent is to the left of the child, it will be DIRECTION_LEFT
         relation_tup = PinDropperPin.DIRECTIONS[reverse_direction(relation)]
-        approx_geo_x = parent.geoX() + relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
-        approx_geo_y = parent.geoY() + relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
+        approx_geo_dx = relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
+        approx_geo_dy = relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
+
+        print(math.sqrt(math.pow(approx_geo_dx, 2) + math.pow(approx_geo_dy, 2)))
+
+        approx_geo_x = parent.geoX() + approx_geo_dx
+        approx_geo_y = parent.geoY() + approx_geo_dy
 
         # ignore values with approximate values outside the bounding box
         if self._bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
-            if self.near_border(approx_geo_x, approx_geo_y):
+            if self.near_border(point_candidate.coords_indexes(), approx_geo_x, approx_geo_y):
                 point_candidate.status(PinDropperPin.STATUS_HOLE)
                 self._flagged_holes[point_candidate.coords_indexes()] = point_candidate
                 return False
             else:
                 if self.ignore_raster:
                     self.drop_pin_at(point_candidate, approx_geo_x, approx_geo_y)
+                    return True
                 else:
                     # print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
                     target = self.sample(parent.geoX(), parent.geoY())
@@ -528,29 +544,20 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._loose_ends.update(
             {p: new_loose_dict[p]
              for p in new_loose_dict
-             if p not in self._loose_ends and p not in self._flagged_holes}
+             if p not in self._loose_ends and p not in self._flagged_holes and p not in self._defined_points}
         )  # avoid adding multiple loose ends for the same x,y pair
 
-    def near_border(self, x, y):
+    def near_border(self, point, x, y):
         '''
 
         '''
+        if self.coords_mins is not None \
+                and np.all(self.coords_mins <= np.array(point)) \
+                and np.all(np.array(point) <= self.coords_maxs):
+            return False
         pline = QgsGeometry.fromPolylineXY(self._bound_box.asPolygon()[0])
         distance = pline.shortestLine(QgsGeometry.fromPointXY(QgsPointXY(x, y))).length()
         return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2))
-
-    def make_connections(self):
-        '''
-        replaces loose-end pins at the locations of existing pins with references to the existing pins
-        '''
-        loose_ends_temp = {point: self._loose_ends[point] for point in self._loose_ends}
-        for loose_end_coords in loose_ends_temp:
-            # if there exists a defined point with the same coords as the loose end
-            if loose_end_coords in self:
-                # merge the loose end
-                self[loose_end_coords].merge_with_loose_end(loose_ends_temp[loose_end_coords])
-                self._loose_ends.pop(loose_end_coords)
-        self._loose_ends = loose_ends_temp  # this line is sus, so keep an eye on it
 
     class SearchBox:
         def __init__(self, idx_radius, geo_center, context):
@@ -712,7 +719,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         return self._defined_points[item]
 
 
-
 class PinDropperPin:
 
     STATUS_PIN = 0
@@ -720,9 +726,9 @@ class PinDropperPin:
     STATUS_DEAD_END = 2
     STATUS_HOLE = 3
 
-    DIRECTION_LEFT = 0
+    DIRECTION_RIGHT = 0
     DIRECTION_UP = 1
-    DIRECTION_RIGHT = 2
+    DIRECTION_LEFT = 2
     DIRECTION_DOWN = 3
     NUM_DIRECTIONS = 4
     DIRECTIONS = (
@@ -746,7 +752,7 @@ class PinDropperPin:
     def drop_geolocation(self, geoX, geoY):
         self.geoX(geoX)
         self.geoY(geoY)
-        self._status = PinDropperPin.STATUS_PIN
+        self.status(PinDropperPin.STATUS_PIN)
 
         for i in range(PinDropperPin.NUM_DIRECTIONS):
             if self._adjs[i] is None:
@@ -760,7 +766,7 @@ class PinDropperPin:
         """
         returns a tuple of the parent of this pin and its relation, assuming this pin is a loose end.
         """
-        assert self._status == PinDropperPin.STATUS_LOOSE_END
+        assert self.status() == PinDropperPin.STATUS_LOOSE_END
         i = list(filter(lambda x: self._adjs[x] is not None, range(PinDropperPin.NUM_DIRECTIONS)))[0]
         return self._adjs[i], i
 
@@ -823,16 +829,23 @@ class PinDropperPin:
         assert self.status() == PinDropperPin.STATUS_PIN
         assert loose_end.status() == PinDropperPin.STATUS_LOOSE_END
         assert self.coords_indexes() == loose_end.coords_indexes()
+
         loose_end_parent, loose_end_parent_rel = loose_end.parent_relation()
         if self._adjs[loose_end_parent_rel] is None:    # i'm not sure why this is ever the case but I could either
                                                         # spend hours on figuring that out or put this if-statement here
             self._adjs[loose_end_parent_rel] = loose_end_parent
+        else:
+            print("self: %s;\n loose_end_parent_rel: %d;\n self._adjs[loose_end_parent_rel]: %s;\n self.coords_indexes(): %s;\n loose_end: %s;\n"
+                  "loose_end_parent: %s" %
+                  (self, loose_end_parent_rel, self._adjs[loose_end_parent_rel], str(self.coords_indexes()), loose_end, loose_end_parent))
+            assert False
 
     def __str__(self):
-        pass
+        return "Point with status %d at indexes %d, %d and geo coords %s with adjacent statuses %s, %s, %s, %s" \
+               % (self.status(), *self.coords_indexes(),
+                  str(self.geoCoords() if self.geoX() is not None else "No geo coords"),
+                  *[str(p.status()) if p is not None else "None" for p in self._adjs])
+
 
 def reverse_direction(direction):
     return int((direction + (PinDropperPin.NUM_DIRECTIONS / 2)) % PinDropperPin.NUM_DIRECTIONS)
-
-    def within(x,y):
-        return
