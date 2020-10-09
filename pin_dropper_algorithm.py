@@ -84,6 +84,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     OUTPUT = 'OUTPUT'
     RASTER_INPUT = 'RASTER_INPUT'
     BOUND_BOX_INPUT = 'BOUND_BOX_INPUT'
+    IGNORE_RASTER_INPUT = 'IGNORE_RASTER_INPUT'
     # row and point interval
     ROW_VECTOR_INPUT = 'R0W_VECTOR_INPUT'
     ROW_HEIGHT_INPUT = 'ROW_HEIGHT_INPUT'
@@ -245,6 +246,14 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
+        self.addParameter(
+            QgsProcessingParameterBoolean(
+                self.IGNORE_RASTER_INPUT,
+                self.tr("Ignore Raster"),
+                defaultValue=False
+            )
+        )
+
         # We add a feature sink in which to store our processed features (this
         # usually takes the form of a newly created vector layer when the
         # algorithm is run in QGIS).
@@ -265,6 +274,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._root = None
         self._bound_box = None
         self._defined_points = {}
+        self._flagged_holes = {}
         self._loose_ends = None
         self.row_h_geo_dx = 0
         self.row_h_geo_dy = 0
@@ -283,6 +293,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
         self.row_h = self.parameterAsDouble(parameters, self.ROW_HEIGHT_INPUT, context)
         row_vector = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
+        self.ignore_raster = self.parameterAsBoolean(parameters, self.IGNORE_RASTER_INPUT, context)
 
         # optional parameters
         row_h_stdev = self.parameterAsDouble(parameters, self.ROW_HEIGHT_STDEV_INPUT, context)
@@ -328,7 +339,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             row_vector_geom.transform(coord_transformer)
 
         assert self.raster.crs().authid() == self._bound_box.crs().authid(), "Raster layer must have same CRS " \
-                                                                        "as bounds vectory layer."
+                                                                             "as bounds vectory layer."
         self.raster.dataProvider()
 
         row_vector = row_vector_geom.asMultiPolyline()[0]
@@ -407,16 +418,17 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # (for now generate random values from 1 to 5)
         values = {coords: randint(1, 5) for coords in self._defined_points}
 
+        attrs = np.array([[*coords, randint(1, 5)] for coords in self._defined_points])
+
         # set output field values
-        for i in range(len(self._defined_points)):  # if you're concerned, the order here does NOT matter
-            coords = list(self._defined_points.keys())[i]
+        for i in range(attrs.shape[0]):  # if you're concerned, the order here does NOT matter
+            coords = tuple(attrs[i, 0:2])
             pin = self._defined_points[coords]
             feat = QgsFeature(id=i)
-            # for i in range(num_attrs):
-            #     feat.setAttribute(i, )
-            # feat.setAttributes((*coords, values[coords]))
-            feat.setGeometry(QgsPoint(*pin.geoCoords()))
-            self._sink.addFeature(feat, QgsFeatureSink.FastInsert)
+            # feat.setFields(out_fields)
+            feat.setAttributes(list(attrs[i, :]))
+            feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
+            self._sink.addFeature(feat)
 
         # Return the results of the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
@@ -484,32 +496,40 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         if self._bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
             if self.near_border(approx_geo_x, approx_geo_y):
                 point_candidate.status(PinDropperPin.STATUS_HOLE)
+                self._flagged_holes[point_candidate.coords_indexes()] = point_candidate
                 return False
             else:
-                # print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
-                target = self.sample(parent.geoX(), parent.geoY())
-                point, rating = self.search(target, approx_geo_x, approx_geo_y)
-                if rating >= self.overlay_match_min_threshold:
-                    geo_x, geo_y = point
-                if rating < self.overlay_match_min_threshold and self.assume_empties:
-                    geo_x, geo_y = approx_geo_x, approx_geo_y
-                if rating >= self.overlay_match_min_threshold or self.assume_empties:
-                    point_candidate.drop_geolocation(geo_x, geo_y)
-                    self._defined_points[point_candidate.coords_indexes()] = point_candidate
-                    new_loose_dict = point_candidate.loose_ends_dict()
-                    self._loose_ends.update(
-                        {p: new_loose_dict[p]
-                         for p in new_loose_dict
-                         if p not in self._loose_ends}
-                        )  # avoid adding multiple loose ends for the same x,y pair
-                    return True
+                if self.ignore_raster:
+                    self.drop_pin_at(point_candidate, approx_geo_x, approx_geo_y)
                 else:
-                    # flag pin as hole TODO: figure out hole handling!
-                    point_candidate.status(PinDropperPin.STATUS_HOLE)
-                    return False
+                    # print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
+                    target = self.sample(parent.geoX(), parent.geoY())
+                    point, rating = self.search(target, approx_geo_x, approx_geo_y)
+                    if rating >= self.overlay_match_min_threshold:
+                        geo_x, geo_y = point
+                    if rating < self.overlay_match_min_threshold and self.assume_empties:
+                        geo_x, geo_y = approx_geo_x, approx_geo_y
+                    if rating >= self.overlay_match_min_threshold or self.assume_empties:
+                        self.drop_pin_at(point_candidate, geo_x, geo_y)
+                        return True
+                    else:
+                        # flag pin as hole TODO: figure out hole handling!
+                        point_candidate.status(PinDropperPin.STATUS_HOLE)
+                        self._flagged_holes[point_candidate.coords_indexes()] = point_candidate
+                        return False
         else:  # if the loose end is outside the bounds of the network, flag it as a dead end
             point_candidate.status(PinDropperPin.STATUS_DEAD_END)
             return False
+
+    def drop_pin_at(self, point, x, y):
+        point.drop_geolocation(x, y)
+        self._defined_points[point.coords_indexes()] = point
+        new_loose_dict = point.loose_ends_dict()
+        self._loose_ends.update(
+            {p: new_loose_dict[p]
+             for p in new_loose_dict
+             if p not in self._loose_ends and p not in self._flagged_holes}
+        )  # avoid adding multiple loose ends for the same x,y pair
 
     def near_border(self, x, y):
         '''
