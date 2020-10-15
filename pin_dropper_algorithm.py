@@ -346,15 +346,17 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         stop = row_vector[len(row_vector)-1]
 
         self._bound_box = list(self._bound_box.getFeatures())[0].geometry()
+        if self._bound_box.isMultipart():
+            self._bound_box = self._bound_box.asGeometryCollection()[0]
 
         assert self._bound_box.contains(row_vector[0]), "Row vector should be within the bounding box."
 
         theta = math.atan2(stop[1] - start[1], stop[0] - start[0])
 
-        self.row_h_geo_dx = math.cos(theta) * self.row_h
-        self.row_h_geo_dy = math.sin(theta) * self.row_h
-        self.col_w_geo_dx = math.cos(theta + math.pi / 2) * self.col_w
-        self.col_w_geo_dy = math.sin(theta + math.pi / 2) * self.col_w
+        self.row_h_geo_dx = math.cos(theta + math.pi / 2) * self.row_h
+        self.row_h_geo_dy = math.sin(theta + math.pi / 2) * self.row_h
+        self.col_w_geo_dx = math.cos(theta) * self.col_w
+        self.col_w_geo_dy = math.sin(theta) * self.col_w
         if row_h_stdev > 0:
             self.row_h_stdev = row_h_stdev / self.row_h
         if point_interval_stdev > 0:
@@ -392,7 +394,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         itercount = 0
         # for debugging, you can change this value to have the algorithm stop before it's technically done
         max_points = approx_total_calcs * 2
-        # max_points = 200
+        # max_points = 20
         while not self.is_complete() and self.population() < max_points:
             feedback.pushInfo("Iteration %d: %d loose ends" % (itercount, len(self._loose_ends)))
             t_iter_begin = time()
@@ -502,10 +504,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         approx_geo_dx = relation_tup[0] * self.col_w_geo_dx + relation_tup[1] * self.row_h_geo_dx
         approx_geo_dy = relation_tup[0] * self.col_w_geo_dy + relation_tup[1] * self.row_h_geo_dy
 
-        print(math.sqrt(math.pow(approx_geo_dx, 2) + math.pow(approx_geo_dy, 2)))
-
         approx_geo_x = parent.geoX() + approx_geo_dx
         approx_geo_y = parent.geoY() + approx_geo_dy
+
 
         # ignore values with approximate values outside the bounding box
         if self._bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
@@ -645,7 +646,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
                         # out the problem
         difference = np.abs(compare-target)
-        norm_diff = np.stack([difference[:,:,n] / (self.band_ranges[n, 1] - self.band_ranges[n, 0])
+        norm_diff = np.stack([difference[:, :, n] / (self.band_ranges[n, 1] - self.band_ranges[n, 0])
                               for n
                               in range(difference.shape[2])], axis=-1)
         avg_difference = np.mean(norm_diff)
