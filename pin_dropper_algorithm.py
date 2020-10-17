@@ -280,8 +280,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.row_h_geo_dy = 0
         self.col_w_geo_dx = 0
         self.col_w_geo_dy = 0
-        self.col_w_stdev = .1
-        self.row_h_stdev = .1
+        self.col_w_stdev = .05
+        self.row_h_stdev = .05
         self.overlay_box_radius = 0
         self.coords_mins = None
         self.coords_maxs = None
@@ -312,8 +312,11 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # handle box radius and box sampling
         self.overlay_box_radius += .5
 
+        # assign rating function
+        self.rate_offset_match = self.rate_offset_match_local_normalized_difference
+
         # Compute the number of steps to display within the progress bar and
-        other_attrs = [field_name] # todo: spec this in csv
+        other_attrs = [field_name]  # todo: spec this in csv
         attrs = ['row', 'col', *other_attrs]
         out_fields = QgsFields()
         # x and y indexes
@@ -442,7 +445,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
             self._sink.addFeature(feat)
 
-        # Return the results of the algorithm. In this case our only result is
+        # Return the results o0.660000f the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
         # algorithms may return multiple feature sinks, calculated numeric
         # statistics, etc. These should all be included in the returned
@@ -520,7 +523,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                     return True
                 else:
                     # print("Sampling target %f, %f" % (parent.geoX(), parent.geoY()))
-                    target = self.sample(parent.geoX(), parent.geoY())
+                    target = PinDropperAlgorithm.Sample(parent.geoX(), parent.geoY(), self)
                     point, rating = self.search(target, approx_geo_x, approx_geo_y)
                     if rating >= self.overlay_match_min_threshold:
                         geo_x, geo_y = point
@@ -622,7 +625,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             if ignore_search_box is not None and ignore_search_box.within(geo_x, geo_y):
                 continue
 
-            compare = self.sample(geo_x, geo_y)
+            compare = PinDropperAlgorithm.Sample(geo_x, geo_y, self)
 
             match = self.rate_offset_match(target, compare)
             if match > best_match:
@@ -634,7 +637,31 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         else:
             return self.search_area(target, search_box.subsearch(best_coords, 2, self), ignore_search_box, iters-1)
 
-    def rate_offset_match(self, target, compare):
+
+    # offset rate algorithms
+    def rate_offset_match_gradients(self, target, compare):
+        '''
+        the most ambitious of my comparison algorithms. attempts to compare the... for lack of a better word,
+        derivitives of the two samples.
+        '''
+        if target.shape() != compare.shape():
+            return 0  # this is a bad solution but allowing the program to handle this and move on might help figure
+            # out the problem
+        a1 = target.gradients()
+        a2 = compare.gradients()
+        return np.mean(np.abs(a1 - a2)) / 255
+
+    def rate_offset_match_relative_match_count(self, target, compare):
+        if target.shape() != compare.shape():
+            return 0  # this is a bad solution but allowing the program to handle this and move on might help figure
+            # out the problem
+        diff_threshold = 0.1  # arbitarary number!
+        diff = target.norm() - compare.norm()
+        match = diff[diff < diff_threshold]
+        rating = 1.0 - (np.count_nonzero(match) / target.a.size())
+        return rating
+
+    def rate_offset_match_absolute_difference(self, target, compare):
         '''
         takes two matrices of raster data and compares them, rating them by similarity
         Just to be clear I am 100% making this algorithm up.
@@ -642,7 +669,32 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         @param compare the matrix to check if it matches target
         @return a value from 0 to 1, where 0 is no match and 1 is 100% match
         '''
-        if target.shape != compare.shape:
+        if target.shape() != compare.shape():
+            return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
+                        # out the problem
+        difference = np.abs(compare-target)
+        avg_difference = np.mean(difference)
+        rating = 1.0 - avg_difference
+        return rating
+
+    def rate_offset_match_local_normalized_difference(self, target, compare):
+        if target.shape() != compare.shape():
+            return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
+                        # out the problem
+        difference = np.abs(target.norm() - compare.norm())
+        avg_difference = np.mean(difference)
+        rating = 1.0 - avg_difference
+        return rating
+
+    def rate_offset_match_global_normalized_difference(self, target, compare):
+        '''
+        takes two matrices of raster data and compares them, rating them by similarity
+        Just to be clear I am 100% making this algorithm up.
+        @param target the matrix to check match with
+        @param compare the matrix to check if it matches target
+        @return a value from 0 to 1, where 0 is no match and 1 is 100% match
+        '''
+        if target.shape() != compare.shape():
             return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
                         # out the problem
         difference = np.abs(compare-target)
@@ -653,51 +705,101 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         rating = 1.0 - avg_difference
         return rating
 
-    def sample(self, center_geo_x, center_geo_y):
-        '''
-        takes values of the raster at each band in a band in a box surrounding center_geo_x,center_geo_y
-        '''
-        w = int(2 * self.overlay_box_radius * self.col_w)
-        h = int(2 * self.overlay_box_radius * self.row_h)
-        x1, y1 = self.asRasterCoords(center_geo_x - self.overlay_box_radius * self.col_w,
-                                     center_geo_y - self.overlay_box_radius * self.row_h)
-        x2, y2 = self.asRasterCoords(center_geo_x + self.overlay_box_radius * self.col_w,
-                                     center_geo_y + self.overlay_box_radius * self.row_h)
-        if x2-x1 != w:
-            x2 = min(x2, x1 + w)
+    class Sample:
+        def __init__(self, center_geo_x, center_geo_y, context):
+            '''
+            takes values of the raster at each band in a band in a box surrounding center_geo_x,center_geo_y
+            '''
 
-        if y2-y1 != h:
-            y2 = min(y2, y1 + h)
+            w = int(2 * context.overlay_box_radius * context.col_w)
+            h = int(2 * context.overlay_box_radius * context.row_h)
 
-        return self.raster_data[x1:x2, y1:y2, :]
+            self._top_left_geo = (center_geo_x - context.overlay_box_radius * context.col_w,
+                                  center_geo_y - context.overlay_box_radius * context.row_h)
 
-        # middle code. uses RasterDataProvider.block(). could not get to work because there's v. little documentation
-        # sample_width = int((2 * self.overlay_box_radius + 1) * self.overlay_box_sampling) # in num samples (pixels)
-        # num_bands = self.raster.dataProvider().bandCount()
-        # sample_data = np.zeros((sample_width, sample_width, num_bands))
-        # point1 = QgsPointXY(center_geo_x - self.overlay_box_radius * self.col_w, center_geo_y - self.overlay_box_radius * self.row_h)
-        # point2 = QgsPointXY(center_geo_x + self.overlay_box_radius * self.col_w, center_geo_y + self.overlay_box_radius * self.row_h)
-        # for band in range(num_bands):
-        #     sample_data[:, :, band] = self.raster.dataProvider().block(band, QgsRectangle(point1, point2), sample_width, sample_width).data()
-        # return sample_data
+            self._bottom_right_geo = (center_geo_x + context.overlay_box_radius * context.col_w,
+                                      center_geo_y + context.overlay_box_radius * context.row_h)
+            x1, y1 = context.asRasterCoords(*self._top_left_geo)
+            x2, y2 = context.asRasterCoords(*self._bottom_right_geo)
 
-        # old code. box aligns with field rows & columns, but FAR too computationally-intensive
-        # # print ("Taking samples of box centered at %f, %f with radius of %d points and %d total samples" %
-        # #        (center_geo_x, center_geo_y, sample_radius, sample_width * sample_width))
-        #
-        # # important note: row_sample_coord and col_sample_coord are in sampling units, not row/col units.
-        # # so to change them back to row/col units, you need to divide by self.overlay_box_sampling
-        # for row_sample_coord in range(-sample_radius, sample_radius):
-        #     for col_sample_coord in range(-sample_radius, sample_radius):
-        #         # and viola! x,y coords in raster units! probably!
-        #         # (multiply columns by rows and vice versa because it's row coordinate vs. column number and vice versa)
-        #         sample_geo_x = center_geo_x + (row_sample_coord * self.col_w_geo_dx + col_sample_coord * self.row_h_geo_dx) / self.overlay_box_sampling
-        #         sample_geo_y = center_geo_y + (row_sample_coord * self.col_w_geo_dy + col_sample_coord * self.row_h_geo_dy) / self.overlay_box_sampling
-        #         # print("Sample raster bands 1 - %d at %f,%f" % (num_bands, sample_geo_x, sample_geo_y))
-        #         bands = self.raster.dataProvider().identify(QgsPointXY(sample_geo_x, sample_geo_y), QgsRaster.IdentifyFormatValue).results()
-        #         bands = [bands[k] for k in bands]
-        #         sample_data[row_sample_coord + sample_radius, col_sample_coord + sample_radius, :] = bands
-        # return sample_data
+            if x2-x1 != w:
+                x2 = min(x2, x1 + w)
+
+            if y2-y1 != h:
+                y2 = min(y2, y1 + h)
+
+            self._top_left_raster = (x1, y1)
+            self._bottom_right_raster = (x2, y2)
+
+            self.a = context.raster_data[x1:x2, y1:y2, :]
+
+            # depending on which match rating algorithm is used, these may or may not ever be needed
+            # calculate them on an as-needed basis
+            self._min = None
+            self._max = None
+            self._norm = None
+            self._gradients = None
+
+            # middle code. uses RasterDataProvider.block(). could not get to work because there's v. little documentation
+            # sample_width = int((2 * self.overlay_box_radius + 1) * self.overlay_box_sampling) # in num samples (pixels)
+            # num_bands = self.raster.dataProvider().bandCount()
+            # sample_data = np.zeros((sample_width, sample_width, num_bands))
+            # point1 = QgsPointXY(center_geo_x - self.overlay_box_radius * self.col_w, center_geo_y - self.overlay_box_radius * self.row_h)
+            # point2 = QgsPointXY(center_geo_x + self.overlay_box_radius * self.col_w, center_geo_y + self.overlay_box_radius * self.row_h)
+            # for band in range(num_bands):
+            #     sample_data[:, :, band] = self.raster.dataProvider().block(band, QgsRectangle(point1, point2), sample_width, sample_width).data()
+            # return sample_data
+
+            # old code. box aligns with field rows & columns, but FAR too computationally-intensive
+            # # print ("Taking samples of box centered at %f, %f with radius of %d points and %d total samples" %
+            # #        (center_geo_x, center_geo_y, sample_radius, sample_width * sample_width))
+            #
+            # # important note: row_sample_coord and col_sample_coord are in sampling units, not row/col units.
+            # # so to change them back to row/col units, you need to divide by self.overlay_box_sampling
+            # for row_sample_coord in range(-sample_radius, sample_radius):
+            #     for col_sample_coord in range(-sample_radius, sample_radius):
+            #         # and viola! x,y coords in raster units! probably!
+            #         # (multiply columns by rows and vice versa because it's row coordinate vs. column number and vice versa)
+            #         sample_geo_x = center_geo_x + (row_sample_coord * self.col_w_geo_dx + col_sample_coord * self.row_h_geo_dx) / self.overlay_box_sampling
+            #         sample_geo_y = center_geo_y + (row_sample_coord * self.col_w_geo_dy + col_sample_coord * self.row_h_geo_dy) / self.overlay_box_sampling
+            #         # print("Sample raster bands 1 - %d at %f,%f" % (num_bands, sample_geo_x, sample_geo_y))
+            #         bands = self.raster.dataProvider().identify(QgsPointXY(sample_geo_x, sample_geo_y), QgsRaster.IdentifyFormatValue).results()
+            #         bands = [bands[k] for k in bands]
+            #         sample_data[row_sample_coord + sample_radius, col_sample_coord + sample_radius, :] = bands
+            # return sample_data
+
+        def min(self, band=None):
+            if self._min is None:
+                self._min = np.amin(self.a, (0, 1))
+            return self._min[band] if band is not None else self._min
+
+        def max(self, band=None):
+            if self._max is None:
+                self._max = np.amax(self.a, (0, 1))
+            return self._max[band] if band is not None else self._max
+
+        def shape(self):
+            return self.a.shape
+
+        def bands(self):
+            return self.a.shape[2]
+
+        def norm(self):
+            if self._norm is None:
+                self._norm = np.stack([self.a[:, :, n] / (self.max(n) - self.min(n))
+                                      for n in range(self.bands())],
+                                     axis=-1)
+            return self._norm
+
+        def gradients(self):
+            if self._gradients is None:
+                self._gradients = gradient(self.a)
+            return self._gradients
+
+        def __str__(self):
+            return "Sample of the raster matrix from %s to %s, corresponding to geo-coords %s, %s" % \
+                   (self._top_left_raster, self._bottom_right_raster, self._top_left_geo, self._bottom_right_geo)
+
 
     def asRasterCoords(self, x_geo, y_geo):
         raster_bounds = self.raster.dataProvider().extent()
@@ -850,3 +952,30 @@ class PinDropperPin:
 
 def reverse_direction(direction):
     return int((direction + (PinDropperPin.NUM_DIRECTIONS / 2)) % PinDropperPin.NUM_DIRECTIONS)
+
+def gradient(a):
+    '''
+    @param a:  a matrix of (n x p x q), where n and p are the width and height. r will be essentially ignored
+    @return an array of shape (n - 2r, p - 2r, q, 2) of x and y magnitudes of the gradient vectors. [:,:,:,0] is x
+        magnitudes, [:,:,:,1] is y-magniutes. algorithm is incomplete; only does partial use of non-row and column
+        differences. this is a deliberate choice for computational power reasons
+    '''
+    r = 2
+    d = 2*r+1
+    w = a.shape[0]
+    h = a.shape[1]
+    vectors = np.zeros((w - 2*r, h - 2*r, a.shape[2], d, d))
+    base = a[r:-r, r:-r, :]
+    for x in range(d):
+        for y in range(d):
+            shift_x = x - (r + 1)
+            shift_y = y - (r + 1)
+            if shift_x == 0 and shift_y == 0:
+                # trying to take gradient from (0,0) rel position
+                continue
+            shift = a[x:x + (w - 2*r), y: y + (h - 2*r), :]
+            vectors[..., x, y] = (base - shift) / (math.pow(shift_x, 2) + math.pow(shift_y, 2))
+    x_grad = np.sum(vectors, axis=3)[:, :, :, r + 1]
+    y_grad = np.sum(vectors, axis=4)[:, :, :, r + 1]
+
+    return np.stack((x_grad, y_grad), axis=-1)
