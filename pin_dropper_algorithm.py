@@ -36,6 +36,7 @@ import numpy as np
 import itertools
 from time import time
 from osgeo import gdal
+import random
 
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessing,
@@ -305,6 +306,36 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
+    def load_params(self, parameters, context):
+        # required parameters
+        self.raster = self.parameterAsRasterLayer(parameters, self.RASTER_INPUT, context)
+        self._bound_box = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
+        self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
+        self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
+        self.row_h = self.parameterAsDouble(parameters, self.ROW_HEIGHT_INPUT, context)
+        # self.ignore_raster = self.parameterAsBoolean(parameters, self.IGNORE_RASTER_INPUT, context)
+
+        # optional parameters
+        row_h_stdev = self.parameterAsDouble(parameters, self.ROW_HEIGHT_STDEV_INPUT, context)
+        point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
+        self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_MIN_INPUT,
+                                                                  context)
+        self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
+        self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
+        self.assume_empties = self.parameterAsBool(parameters, self.ASSUME_EMPTIES_INPUT, context)
+        offset_func_idx = self.parameterAsEnum(parameters, self.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
+        self.rate_offset_match = list(self.MATCH_FUNCTIONS.values())[offset_func_idx]
+        self.compare_from_root = self.parameterAsBool(parameters, self.COMPARE_FROM_ROOT_INPUT, context)
+        self.precision_bias_coeff = self.parameterAsDouble(parameters, self.PRECISION_BIAS_COEFFICIENT_INPUT, context)
+
+        assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
+
+        self.overlay_box_radius += .5
+
+        if row_h_stdev > 0:
+            self.row_h_stdev = row_h_stdev / self.row_h
+        if point_interval_stdev > 0:
+            self.col_w_stdev = point_interval_stdev / self.col_w
 
     def processAlgorithm(self, parameters, context, feedback):
         """
@@ -327,38 +358,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.coords_mins = None
         self.coords_maxs = None
         # read parameters
+        self.load_params(parameters, context)
 
-        # required parameters
-        self.raster = self.parameterAsRasterLayer(parameters, self.RASTER_INPUT, context)
-        self._bound_box = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
-        self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
-        self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
-        self.row_h = self.parameterAsDouble(parameters, self.ROW_HEIGHT_INPUT, context)
-        row_vector = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
-        # self.ignore_raster = self.parameterAsBoolean(parameters, self.IGNORE_RASTER_INPUT, context)
-
-        # optional parameters
-        row_h_stdev = self.parameterAsDouble(parameters, self.ROW_HEIGHT_STDEV_INPUT, context)
-        point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
-        self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_MIN_INPUT, context)
-        self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
-        self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
-        self.assume_empties = self.parameterAsBool(parameters, self.ASSUME_EMPTIES_INPUT, context)
-        offset_func_idx = self.parameterAsEnum(parameters, self.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
-        self.rate_offset_match = list(self.MATCH_FUNCTIONS.values())[offset_func_idx]
-        self.compare_from_root = self.parameterAsBool(parameters, self.COMPARE_FROM_ROOT_INPUT, context)
-        self.precision_bias_coeff = self.parameterAsDouble(parameters, self.g, context)
-
-        assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
-
-        field_name = self.parameterAsString(parameters, self.FIELD_NAME_INPUT, context)
+        self.load_raster_data()
 
         # handle box radius and box sampling
-        self.overlay_box_radius += .5
 
         # assign rating function
 
-        # Compute the number of steps to display within the progress bar and
+        field_name = self.parameterAsString(parameters, self.FIELD_NAME_INPUT, context)
         other_attrs = [field_name]  # todo: spec this in csv
         attrs = ['row', 'col', *other_attrs]
         out_fields = QgsFields()
@@ -377,6 +385,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             fields=out_fields,
             geometryType=QgsWkbTypes.Point,
             crs=self._bound_box.crs())
+
+        row_vector = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
 
         # convert row vector to the same CRS as the bounding box
         row_vector_geom = list(row_vector.getFeatures())[0].geometry()
@@ -403,37 +413,16 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.row_h_geo_dy = math.sin(theta + math.pi / 2) * self.row_h
         self.col_w_geo_dx = math.cos(theta) * self.col_w
         self.col_w_geo_dy = math.sin(theta) * self.col_w
-        if row_h_stdev > 0:
-            self.row_h_stdev = row_h_stdev / self.row_h
-        if point_interval_stdev > 0:
-            self.col_w_stdev = point_interval_stdev / self.col_w
 
         assert not self.near_border((0, 0), *start), "Row vector should not be near the edge of the bounding box."
 
-        # init self params
-        ds = gdal.Open(self.raster.dataProvider().dataSourceUri())
-        self.raster_data = np.stack([
-            ds.GetRasterBand(band+1).ReadAsArray()
-            for band
-            in range(self.raster.dataProvider().bandCount())
-        ], axis=-1)
-
-        self.band_ranges = np.stack([
-            np.amin(self.raster_data, axis=tuple(range(len(self.raster_data.shape)-1))),
-            np.amax(self.raster_data, axis=tuple(range(len(self.raster_data.shape)-1)))
-        ], axis=-1)
-
-        blank_axes = self.band_ranges[:, 0] != self.band_ranges[:, 1]
-        self.raster_data = self.raster_data[:, :, blank_axes]
-        self.band_ranges = self.band_ranges[blank_axes, :]
-        del ds  # save memory
-
+        # establish root for pin map
         self._root = PinDropperPin(0, 0, None, -1)
         self._loose_ends = {}
         self.drop_pin_at(self._root, *start)
         self._root_sample = PinDropperAlgorithm.Sample(*self._root.geoCoords(), self)
 
-
+        # Compute the number of steps to display within the progress bar
         approx_total_calcs = self._bound_box.area() / ((self.row_h_geo_dx + self.col_w_geo_dx) * (self.row_h_geo_dy + self.col_w_geo_dy))
 
         feedback.setProgress(0)
@@ -478,17 +467,17 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # read values from source csv file
         # (for now generate random values from 1 to 5)
 
-        attrs = np.array([[*coords, randint(1, 5)] for coords in self._defined_points])
+        attr_vals = np.array([[*coords, randint(1, 5)] for coords in self._defined_points])
 
         # set output field values
-        for i in range(attrs.shape[0]):  # if you're concerned, the order here does NOT matter
-            coords = tuple(attrs[i, 0:2])
+        for i in range(attr_vals.shape[0]):  # if you're concerned, the order here does NOT matter
+            coords = tuple(attr_vals[i, 0:2])
             pin = self._defined_points[coords]
             feat = QgsFeature(id=i)
-            # feat.setFields(out_fields)
-            feat.setAttributes(list(attrs[i, :]))
             feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
             self._sink.addFeature(feat)
+            feat.setAttributes(list(attr_vals[i, :]))
+
 
         # Return the results o0.660000f the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
@@ -497,6 +486,27 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # dictionary, with keys matching the feature corresponding parameter
         # or output names.
         return {self.OUTPUT: dest_id}
+
+
+    def load_raster_data(self):
+        # init self params
+        ds = gdal.Open(self.raster.dataProvider().dataSourceUri())
+        self.raster_data = np.stack([
+            ds.GetRasterBand(band+1).ReadAsArray()
+            for band
+            in range(self.raster.dataProvider().bandCount())
+        ], axis=-1)
+
+        self.band_ranges = np.stack([
+            np.amin(self.raster_data, axis=tuple(range(len(self.raster_data.shape) - 1))),
+            np.amax(self.raster_data, axis=tuple(range(len(self.raster_data.shape) - 1)))
+        ], axis=-1)
+
+        blank_axes = self.band_ranges[:, 0] != self.band_ranges[:, 1]
+        self.raster_data = self.raster_data[:, :, blank_axes]
+        self.band_ranges = self.band_ranges[blank_axes, :]
+        del ds  # save memory
+
 
     def name(self):
         """
@@ -710,7 +720,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         rating = 1.0 - (np.count_nonzero(match) / target.a.size)
         return rating
 
-    def rate_offset_match_absolute_difference(self, target, compare):
+    def rate_offset_match_absolute_difference(self, target, compare, margins=[0,0,0,0]):
         '''
         takes two matrices of raster data and compares them, rating them by similarity
         Just to be clear I am 100% making this algorithm up.
@@ -721,7 +731,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         if target.shape() != compare.shape():
             return 0    # this is a bad solution but allowing the program to handle this and move on might help figure
                         # out the problem
-        difference = np.abs(compare-target)
+        difference = np.abs(compare.a-target.a)
         avg_difference = np.mean(difference)
         rating = 1.0 - avg_difference
         return rating
@@ -761,7 +771,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         search. I may have done the math wrong here.
         '''
 
-        return math.random() * (math.pow(self.search_iter_size, 2) / self.overlay_match_min_threshold)
+        return random.random() * (math.pow(self.search_iter_size, 2) / self.overlay_match_min_threshold)
 
 
     class Sample:
@@ -827,6 +837,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             #         sample_data[row_sample_coord + sample_radius, col_sample_coord + sample_radius, :] = bands
             # return sample_data
 
+        def data(self, margins):
+            return self.a
+
         def min(self, band=None):
             if self._min is None:
                 self._min = np.amin(self.a, (0, 1))
@@ -858,6 +871,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         def __str__(self):
             return "Sample of the raster matrix from %s to %s, corresponding to geo-coords %s, %s" % \
                    (self._top_left_raster, self._bottom_right_raster, self._top_left_geo, self._bottom_right_geo)
+
 
 
     def asRasterCoords(self, x_geo, y_geo):
