@@ -76,6 +76,16 @@ DIRECTIONS = (
 ROW_NAME = 'row'
 COL_NAME = 'col'
 
+DTYPE_CONVERSIONS = {
+            '?': (QVariant.Bool, bool),
+            'b': (QVariant.Int, int),
+            'B': (QVariant.Int, int),
+            'i': (QVariant.Int, int),
+            'u': (QVariant.Int, int),
+            'f': (QVariant.Double, float),
+            'U': (QVariant.String, str)
+        }
+
 class PinDropperAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
@@ -114,8 +124,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     #output field name
     DROP_DATALESS_POINTS_INPUT = 'DROP_DATALESS_POINTS_INPUT'
     DATA_SOURCE_INPUT = 'FIELD_NAME_INPUT'
-    DATA_SOURCE_X_EXPRESSION_INPUT = 'DATA_SOURCE_X_EXPRESSION_INPUT'
-    DATA_SOURCE_Y_EXPRESSION_INPUT = 'DATA_SOURCE_Y_EXPRESSION_INPUT'
+    PANEL_SIZE_INPUT = 'PANEL_SIZE_INPUT'
     DATA_SOURCE_FIELDS_TO_USE = 'DATA_SOURCE_FIELDS_TO_USE'
 
     # testing parameters
@@ -131,13 +140,13 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         """
 
         self.MATCH_FUNCTIONS = {
+            "Regular": None,
             "Local Normalized Difference": self.rate_offset_match_local_normalized_difference,
             "Global Normalized Difference": self.rate_offset_match_global_normalized_difference,
             "Absolute Difference": self.rate_offset_match_absolute_difference,
             "Relative Match Count": self.rate_offset_match_relative_match_count,
             "Gradients": self.rate_offset_match_gradients,
-            "Random": self.rate_offset_match_random,
-            "Regular": None
+            "Random": self.rate_offset_match_random
         }
 
         # raster layer. repeating pattern in the raster will be used to drop pins
@@ -174,6 +183,24 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
+        param = QgsProcessingParameterEnum(
+            self.RATE_OFFSET_MATCH_FUNCTION_INPUT,
+            self.tr("Rate Offset Match Function"),
+            options=self.MATCH_FUNCTIONS,
+            defaultValue=0  # nothing I write here makes any difference
+        )
+        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(param)
+
+        param = QgsProcessingParameterBoolean(
+            self.COMPARE_FROM_ROOT_INPUT,
+            self.tr("Compare from Root"),
+            defaultValue=False
+        )
+        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(param)
+
+
         param = QgsProcessingParameterString(
             self.DATA_SOURCE_FIELDS_TO_USE,
             self.tr("Fields to Use"),
@@ -182,22 +209,14 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
-        param = QgsProcessingParameterString(
-            self.DATA_SOURCE_X_EXPRESSION_INPUT,
-            self.tr("x Expression"),
-            optional=True
+        param = QgsProcessingParameterNumber(
+            self.PANEL_SIZE_INPUT,
+            self.tr("Panel Size"),
+            minValue=0,
+            defaultValue=0
         )
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
-
-        param = QgsProcessingParameterString(
-            self.DATA_SOURCE_Y_EXPRESSION_INPUT,
-            self.tr("y Expression"),
-            optional=True
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
 
         self.addParameter(
             QgsProcessingParameterBoolean(
@@ -211,7 +230,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterDistance(
                 self.ROW_HEIGHT_INPUT,
-                self.tr('Row Height'),
+                self.tr('Row Spacing'),
                 parentParameterName=self.BOUND_BOX_INPUT,
                 minValue=0
             )
@@ -270,7 +289,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
-
         param = QgsProcessingParameterNumber(
             self.POINT_INTERVAL_STDEV_INPUT,
             self.tr('Point Interval Stdev'),
@@ -308,23 +326,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             minValue=0,
             defaultValue=0
 
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        param = QgsProcessingParameterEnum(
-            self.RATE_OFFSET_MATCH_FUNCTION_INPUT,
-            self.tr("Rate Offset Match Function"),
-            options=self.MATCH_FUNCTIONS,
-            defaultValue=0 # nothing I write here makes any difference
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        param = QgsProcessingParameterBoolean(
-            self.COMPARE_FROM_ROOT_INPUT,
-            self.tr("Compare from Root"),
-            defaultValue=False
         )
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
@@ -463,6 +464,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             return {self.OUTPUT: None}
         # handle box radius and box sampling
 
+        self.relativize_coords()
+
         data, attrs = self.load_input_data(parameters, context)
 
         out_fields = QgsFields()
@@ -486,21 +489,56 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         # set output field values
         count = 0
-        for coords in self._defined_points:
-            if data is not None:
-                data[self.input_col_attr_name] == coords[0], data[self.input_row_attr_name] == coords[1]
-                idx_in_data = np.where(np.all(np.stack([
-                    data[self.input_col_attr_name] == coords[0], data[self.input_row_attr_name] == coords[1]]),
-                    axis=0))[0]
-                assert idx_in_data.size <= 1, "More than one line in the input data for %s" % (coords)
-            if self.drop_dataless_points or idx_in_data.size > 0:
-                pin = self._defined_points[coords]
-                feat = QgsFeature(id=count)
-                count = count + 1
-                feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
-                if data is not None and idx_in_data.size > 0:
-                    feat.setAttributes(list(data[idx_in_data[0]]))
-                self.sink.addFeature(feat)
+        already_dropped = []
+        not_dropped = []
+        if data is not None:
+            for entry in data:
+                coords = (entry[self.input_col_attr_name], entry[self.input_row_attr_name])  # coords backwards?
+                if coords in self._defined_points:
+                    pin = self[coords]
+                    vals = [DTYPE_CONVERSIONS[data.dtype[i].kind][1](entry[i]) for i in range(len(data.dtype))]
+                    print(vals)
+                    count = self.add_pin_to_output(pin, vals, count)
+                    already_dropped.append(coords)
+                else:
+                    not_dropped.append(coords)
+
+        if self.drop_dataless_points or data is None:
+            for coords in self._defined_points:
+                if coords not in already_dropped:
+                    entry = [np.nan for _ in attrs]
+                    entry[self.col_attr_idx] = int(coords[0])  # coords backwards?
+                    entry[self.row_attr_idx] = int(coords[1])
+                    count = self.add_pin_to_output(self[coords], entry, count)
+
+        # dropped_data = np.full(shape=data.shape, fill_value=False)
+        # print(data[self.input_col_attr_name])
+        # print(data[self.input_row_attr_name])
+        # for coords in self._defined_points:
+        #     if data is not None:
+        #         coord_identities = np.stack([data[self.input_col_attr_name] == coords[1], data[self.input_row_attr_name] == coords[0]], axis=0)
+        #         idx_in_data = np.where(np.all(coord_identities, axis=0))[0]
+        #         assert idx_in_data.size <= 1, "More than one line in the input data for %s" % (coords)
+        #         if coords[1] == 5 and coords[0] == 30:
+        #             print(data[self.input_col_attr_name] == coords[0])
+        #             print(data[self.input_row_attr_name] == coords[1])
+        #             print(coord_identities)
+        #             print(idx_in_data)
+        #             print(coords)
+        #     if self.drop_dataless_points or idx_in_data.size > 0:
+        #         pin = self._defined_points[coords]
+        #         feat = QgsFeature(id=count)
+        #         count = count + 1
+        #         feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
+        #         if data is not None and idx_in_data.size > 0:
+        #             feat.setAttributes(list(data[idx_in_data[0]]))
+        #             dropped_data[idx_in_data[0]] = True
+        #             print("Dropped data for %s" % [ coords])
+        #         self.sink.addFeature(feat)
+        #
+        # missing_data = data[dropped_data == False]
+        for d in not_dropped:
+            feedback.pushInfo("Did not drop coordinates for %d, %d." % d)
 
         # Return the results of the algorithm. In this case our only result is
         # the feature sink which contains the processed features, but some
@@ -543,70 +581,67 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             # TODO: maybe put all of this in load_input_data eventually
 
             # read input data analysis parameters
-            x_convert = self.parameterAsString(parameters, self.DATA_SOURCE_X_EXPRESSION_INPUT, context)
-            y_convert = self.parameterAsString(parameters, self.DATA_SOURCE_Y_EXPRESSION_INPUT, context)
             fields_to_use = self.parameterAsString(parameters, self.DATA_SOURCE_FIELDS_TO_USE, context)
+            panel_size = self.parameterAsInt(parameters, self.PANEL_SIZE_INPUT, context)
 
             fields_to_use_list = []
             if fields_to_use.strip():
                 fields_to_use_list = map(lambda x: x.strip(), fields_to_use.rsplit(','))
-            attrs = attrs + [(input_data.dtype.names[i], input_data.dtype[i])
+            attrs = [(input_data.dtype.names[i], input_data.dtype[i])
                              for i in range(len(input_data.dtype))
                              if ((not fields_to_use.strip()) or input_data.dtype.names[i] in fields_to_use_list)]
+            if panel_size > 0:
+                attrs = attrs + [(COL_NAME, np.int16)]
+                self.input_col_attr_name = COL_NAME
+            else:
+                col_regex = "([_\-\w]?[Cc]ol.?)|(.?[Nn]umber.?)"
+                self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, col_regex)
+                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or 'number"
 
-            if x_convert.strip():
-                attrs = attrs + [(COL_NAME, np.dtype(np.int16))]
-            if y_convert.strip():
-                attrs = attrs + [(ROW_NAME, np.dtype(np.int16))]
+            row_regex = "[_\-\w]?[Rr]ow"
+            self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, row_regex)
+            assert self.row_attr_idx > -1, "No column in the attached file can be identified as 'row'"
+
+            attrs[self.row_attr_idx] = (attrs[self.row_attr_idx][0], np.dtype(np.int_))
+            attrs[self.col_attr_idx] = (attrs[self.col_attr_idx][0], np.dtype(np.int_))
 
             data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
 
-            # I know this is flagged as not used; it's a utility function fo the eval() calls
-            col = lambda x: input_data[x]
-
-            if x_convert.strip():
-                data[COL_NAME] = eval(x_convert.strip())
+            if panel_size > 0:
+                panel_regex = ".?[Pp]anel.?"
+                panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, panel_regex)
+                assert panel_attr_idx > -1, "No column in the attached file can ve identified as 'panel'"
+                vine_regex = ".?([Vv]ine)|([Pp]lant).?"
+                vine_attr_name, vine_attr_idx = match_index(input_data.dtype.names, vine_regex)
+                assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
+                data[self.input_col_attr_name] = panel_size * input_data[panel_attr_name] + input_data[vine_attr_name]
             else:
-                col_regex = "([_\-\w]?[Cc]ol.?)|(.?[Nn]umber.?)"
-                self.input_col_attr_name, col_attr_idx = match_index(input_data.dtype.names, col_regex)
-                assert col_attr_idx > -1, "No column in the attached file matches field columns"
+
                 col_max = np.amax(np.abs(input_data[self.input_col_attr_name]))
-                negative_cols = data[self.input_col_attr_name] < 0
-                data[self.input_col_attr_name][negative_cols] = col_max + data[self.input_col_attr_name][negative_cols]
+                negative_cols = input_data[self.input_col_attr_name] < 0
+                data[self.input_col_attr_name][negative_cols] = col_max + input_data[self.input_col_attr_name][negative_cols]
+                data[self.input_col_attr_name][negative_cols == False] = input_data[self.input_col_attr_name][negative_cols == False]
 
-            if y_convert.strip():
-                data[ROW_NAME] = eval(y_convert.strip())
-            else:
-                row_regex = "[_\-\w]?[Rr]ow"
-                self.input_row_attr_name, row_attr_idx = match_index(input_data.dtype.names, row_regex)
-                assert row_attr_idx > -1, "No column in the attached file matches field rows"
-                row_max = np.amax(np.abs(input_data[self.input_row_attr_name]))
-                negative_rows = data[self.input_row_attr_name] < 0
-                data[self.input_row_attr_name][negative_rows] = row_max + data[self.input_row_attr_name][negative_rows]
+            row_max = np.amax(np.abs(input_data[self.input_row_attr_name]))
+            negative_rows = input_data[self.input_row_attr_name] < 0
+            data[self.input_row_attr_name][negative_rows] = row_max + input_data[self.input_row_attr_name][negative_rows]
+            data[self.input_row_attr_name][negative_rows == False] = input_data[self.input_row_attr_name][negative_rows == False]
 
             for dt_name, _ in attrs:
-                if dt_name == ROW_NAME or dt_name == COL_NAME or \
-                    (not x_convert.strip() and dt_name == self.input_col_attr_name) or \
-                    (not y_convert.strip() and dt_name == self.input_row_attr_name):
+                if dt_name == self.input_col_attr_name or dt_name == self.input_col_attr_name:
                     continue
                 data[dt_name] = input_data[dt_name]
 
         else:
             data = None
-            attrs = [(ROW_NAME, np.dtype(np.int16)), (COL_NAME, np.dtype(np.int16)), ('data', np.dtype(np.float32))]
-            self.input_row_attr_name = ROW_NAME
+            attrs = [(COL_NAME, np.dtype(np.int16)), (ROW_NAME, np.dtype(np.int16)), ('data', np.dtype(np.float32))]
             self.input_col_attr_name = COL_NAME
+            self.col_attr_idx = 0
+            self.input_row_attr_name = ROW_NAME
+            self.row_attr_idx = 1
 
-        replacers = {
-            '?': QVariant.Bool,
-            'b': QVariant.Int,
-            'B': QVariant.Int,
-            'i': QVariant.Int,
-            'u': QVariant.Int,
-            'f': QVariant.Double,
-            'U': QVariant.String
-        }
-        out_attrs_types = [(name, replacers[t.kind]) for name, t in attrs]
+
+        out_attrs_types = [(name, DTYPE_CONVERSIONS[t.kind][0]) for name, t in attrs]
 
         return data, out_attrs_types
 
@@ -655,6 +690,34 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                         self.patch_hole(np.flip(hole))
                         holecount = holecount + 1
         return holecount
+
+    def relativize_coords(self):
+        all_dropped_coords = np.stack(self._defined_points.keys(), axis=-1)
+        # x_vals = np.unique(all_dropped_coords[0, :])
+        # y_vals = np.unique(all_dropped_coords[1, :])
+        x_vals = [all_dropped_coords[0, all_dropped_coords[1, :] == y] for y in np.unique(all_dropped_coords[1, :])]
+        y_vals = [all_dropped_coords[1, all_dropped_coords[0, :] == x] for x in np.unique(all_dropped_coords[0, :])]
+        print("x values for ys: " + str(x_vals))
+        print("y values for xs: " + str(y_vals))
+
+        xmins = np.array([min(xs) for xs in x_vals])
+        ymins = np.array([min(ys) for ys in y_vals])
+
+        points = self._defined_points.values()
+        adjusted_points = {}
+        for pin in points:
+            pin.relativize(xmins[pin.y_index()], ymins[pin.y_index()])
+            adjusted_points[pin.coords_indexes()] = pin
+
+        self._defined_points = adjusted_points
+
+    def add_pin_to_output(self, pin, data, count):
+        feat = QgsFeature(id=count)
+        feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
+        feat.setAttributes(data)
+        self.sink.addFeature(feat)
+        # print()
+        return count + 1
 
     def name(self):
         """
@@ -1343,6 +1406,10 @@ class PinDropperPin:
                   "loose_end_parent: %s" %
                   (self, loose_end_parent_rel, self._adjs[loose_end_parent_rel], str(self.coords_indexes()), loose_end, loose_end_parent))
             assert False
+
+    def relativize(self, xmin, ymin):
+        self._x_index = self._x_index - xmin
+        self._y_index = self._y_index - ymin
 
     def __str__(self):
         return "Point with status %d at indexes %d, %d and geo coords %s with adjacent statuses %s, %s, %s, %s" \
