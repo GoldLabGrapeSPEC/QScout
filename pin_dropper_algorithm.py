@@ -76,6 +76,7 @@ DIRECTIONS = (
 ROW_NAME = 'row'
 COL_NAME = 'col'
 
+# for converting from numpy types to QVariants used by QGIS or Python data types that go into the QVariants
 DTYPE_CONVERSIONS = {
             '?': (QVariant.Bool, bool),
             'b': (QVariant.Int, int),
@@ -154,7 +155,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterRasterLayer(
                 self.RASTER_INPUT,
                 self.tr('Raster Layer'),
-                [QgsProcessing.TypeRaster]
+                [QgsProcessing.TypeRaster],
+                optional=True
             )
         )
         # bounding box
@@ -222,7 +224,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterBoolean(
                 self.DROP_DATALESS_POINTS_INPUT,
                 self.tr("Drop Data-less Points"),
-                defaultValue=True  # should maybe change to false in production version
+                defaultValue=False  # should maybe change to false in production version
             )
         )
 
@@ -264,13 +266,13 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                 type=QgsProcessingParameterNumber.Double,
                 minValue=0,
                 maxValue=1,
-                defaultValue=.66,  # this number has absolutely no scientific or mathematical basis
+                defaultValue=.85,  # this number has absolutely no scientific or mathematical basis
             )
         )
 
         param = QgsProcessingParameterNumber(
             self.PATCH_SIZE_INPUT,
-            self.tr('Hole Fill Size'),
+            self.tr('Maximum Patch Size'),
             type=QgsProcessingParameterNumber.Integer,
             minValue=0,
             defaultValue=2
@@ -346,7 +348,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.bound_box_layer = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
         self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
         self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
+        assert self.col_w > 0, "Point interval must be greater than zero."
         self.row_h = self.parameterAsDouble(parameters, self.ROW_HEIGHT_INPUT, context)
+        assert self.row_h > 0, "Row spacing must be greater than zero."
         self.row_vector_layer = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
         # self.ignore_raster = self.parameterAsBoolean(parameters, self.IGNORE_RASTER_INPUT, context)
 
@@ -369,6 +373,9 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
 
+        assert self.raster is not None or self.rate_offset_match is None, "All rate functions except 'Regular' require" \
+                                                                          "a raster layer."
+
         self.overlay_box_radius += .5
 
         if row_h_stdev > 0:
@@ -385,7 +392,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._root = None
         self.bound_box = None
         self._defined_points = {}
-        self._flagged_holes = {}
         self._loose_ends = None
         self.row_h_geo_dx = 0
         self.row_h_geo_dy = 0
@@ -399,8 +405,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # read parameters
         self.load_params(parameters, context)
 
-        self.load_raster_data()
-
+        if self.rate_offset_match is not None:
+            self.load_raster_data()
 
         # convert row vector to the same CRS as the bounding box
         row_vector_geom = list(self.row_vector_layer.getFeatures())[0].geometry()
@@ -409,8 +415,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             coord_transformer = QgsCoordinateTransform(self.row_vector_layer.crs(), self.bound_box_layer.crs(), transform_context)
             row_vector_geom.transform(coord_transformer)
 
-        assert self.raster.crs().authid() == self.bound_box_layer.crs().authid(), "Raster layer must have same CRS " \
-                                                                             "as bounds vectory layer."
+        assert self.raster is None or self.raster.crs().authid() == self.bound_box_layer.crs().authid(), \
+            "Raster layer must have same CRS as bounds vectory layer."
         row_vector = row_vector_geom.asMultiPolyline()[0]
         start = row_vector[0]
         stop = row_vector[len(row_vector)-1]
@@ -434,11 +440,10 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._root = PinDropperPin(0, 0, None, -1)
         self._loose_ends = {}
         self.drop_pin_at(self._root, *start)
-        self._root_sample = PinDropperAlgorithm.Sample(*self._root.geoCoords(), self)
-        assert self._root_sample.a is not None, "Entire root sample outside bounds despite not being near edge." \
-                                                "I have no idea how that can even happen."
-        # DEBUG: test self-similarity
         if self.rate_offset_match is not None:
+            self._root_sample = PinDropperAlgorithm.Sample(*self._root.geoCoords(), self)
+            assert self._root_sample.a is not None, "Entire root sample outside bounds despite not being near edge." \
+                                                    "I have no idea how that can even happen."
             self_similarity = self.rate_offset_match(self._root_sample, self._root_sample)
             assert self_similarity > .975, "Self-similarity score: %s" % self_similarity  # allow some leeway for rounding errors
 
@@ -458,12 +463,21 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             self.id_points_iterate(feedback)
             itercount = itercount + 1
 
+            # update progress
             feedback.setProgress(int(100 * self.population() / approx_total_calcs))
             feedback.setProgressText("%d / ~%d" % (self.population(), approx_total_calcs))
+
+        # if the user has cancelled the process, stop everything else
         if feedback.isCanceled():
             return {self.OUTPUT: None}
-        # handle box radius and box sampling
 
+        # patch holes. here be dragons
+        if self.is_do_patches():
+            holecount = self.patch_holes()
+            if holecount > 0:
+                feedback.pushInfo("Patched %n holes.")
+
+        # 'relativize' the coordinates, so x and y both start at 1
         self.relativize_coords()
 
         data, attrs = self.load_input_data(parameters, context)
@@ -493,11 +507,10 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         not_dropped = []
         if data is not None:
             for entry in data:
-                coords = (entry[self.input_col_attr_name], entry[self.input_row_attr_name])  # coords backwards?
+                coords = (entry[self.input_col_attr_name], entry[self.input_row_attr_name])
                 if coords in self._defined_points:
                     pin = self[coords]
                     vals = [DTYPE_CONVERSIONS[data.dtype[i].kind][1](entry[i]) for i in range(len(data.dtype))]
-                    print(vals)
                     count = self.add_pin_to_output(pin, vals, count)
                     already_dropped.append(coords)
                 else:
@@ -507,36 +520,10 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             for coords in self._defined_points:
                 if coords not in already_dropped:
                     entry = [np.nan for _ in attrs]
-                    entry[self.col_attr_idx] = int(coords[0])  # coords backwards?
+                    entry[self.col_attr_idx] = int(coords[0])
                     entry[self.row_attr_idx] = int(coords[1])
                     count = self.add_pin_to_output(self[coords], entry, count)
 
-        # dropped_data = np.full(shape=data.shape, fill_value=False)
-        # print(data[self.input_col_attr_name])
-        # print(data[self.input_row_attr_name])
-        # for coords in self._defined_points:
-        #     if data is not None:
-        #         coord_identities = np.stack([data[self.input_col_attr_name] == coords[1], data[self.input_row_attr_name] == coords[0]], axis=0)
-        #         idx_in_data = np.where(np.all(coord_identities, axis=0))[0]
-        #         assert idx_in_data.size <= 1, "More than one line in the input data for %s" % (coords)
-        #         if coords[1] == 5 and coords[0] == 30:
-        #             print(data[self.input_col_attr_name] == coords[0])
-        #             print(data[self.input_row_attr_name] == coords[1])
-        #             print(coord_identities)
-        #             print(idx_in_data)
-        #             print(coords)
-        #     if self.drop_dataless_points or idx_in_data.size > 0:
-        #         pin = self._defined_points[coords]
-        #         feat = QgsFeature(id=count)
-        #         count = count + 1
-        #         feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
-        #         if data is not None and idx_in_data.size > 0:
-        #             feat.setAttributes(list(data[idx_in_data[0]]))
-        #             dropped_data[idx_in_data[0]] = True
-        #             print("Dropped data for %s" % [ coords])
-        #         self.sink.addFeature(feat)
-        #
-        # missing_data = data[dropped_data == False]
         for d in not_dropped:
             feedback.pushInfo("Did not drop coordinates for %d, %d." % d)
 
@@ -573,6 +560,12 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     def load_input_data(self, parameters, context):
 
         attrs = []
+        fields_to_use = self.parameterAsString(parameters, self.DATA_SOURCE_FIELDS_TO_USE, context)
+
+        fields_to_use_list = []
+        if fields_to_use.strip():
+            fields_to_use_list = map(lambda x: x.strip(), fields_to_use.rsplit(','))
+
         # assign rating function
         if self.data_source.strip():
             fn = self.data_source
@@ -581,12 +574,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             # TODO: maybe put all of this in load_input_data eventually
 
             # read input data analysis parameters
-            fields_to_use = self.parameterAsString(parameters, self.DATA_SOURCE_FIELDS_TO_USE, context)
             panel_size = self.parameterAsInt(parameters, self.PANEL_SIZE_INPUT, context)
 
-            fields_to_use_list = []
-            if fields_to_use.strip():
-                fields_to_use_list = map(lambda x: x.strip(), fields_to_use.rsplit(','))
             attrs = [(input_data.dtype.names[i], input_data.dtype[i])
                              for i in range(len(input_data.dtype))
                              if ((not fields_to_use.strip()) or input_data.dtype.names[i] in fields_to_use_list)]
@@ -634,12 +623,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         else:
             data = None
-            attrs = [(COL_NAME, np.dtype(np.int16)), (ROW_NAME, np.dtype(np.int16)), ('data', np.dtype(np.float32))]
+            if fields_to_use.strip():
+                attrs = [(COL_NAME, np.dtype(np.int16)), (ROW_NAME, np.dtype(np.int16))]
+                attrs.extend([(name, np.dtype(np.str)) for name in fields_to_use_list])
+            else:
+                attrs = [(COL_NAME, np.dtype(np.int16)), (ROW_NAME, np.dtype(np.int16)), ('data', np.dtype(np.str))]
             self.input_col_attr_name = COL_NAME
             self.col_attr_idx = 0
             self.input_row_attr_name = ROW_NAME
             self.row_attr_idx = 1
-
 
         out_attrs_types = [(name, DTYPE_CONVERSIONS[t.kind][0]) for name, t in attrs]
 
@@ -668,48 +660,119 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                 self[coords].merge_with_loose_end(self._loose_ends[coords])
                 self._loose_ends.pop(coords)
 
-        all_dropped_coords = np.stack(self._defined_points.keys(), axis=-1)
-        self.coords_mins = np.amin(all_dropped_coords, 1)
-        self.coords_maxs = np.amax(all_dropped_coords, 1)
-        # holecount = self.patch_holes()
-        # if holecount > 0:
-        #     feedback.pushInfo("Patched %n holes.")
+        self.refresh_mins_maxs()
 
     def patch_holes(self):
+        all_dropped_coords = self.points_as_array()
+
         holecount = 0
-        all_dropped_coords = np.stack(self._defined_points.keys(), axis=-1)
-        for crd_idx in (0, 1):
-            for crd in range(self.coords_mins[crd_idx], self.coords_maxs[crd_idx]):
-                other_crd = (crd_idx + 1) % 2
-                coordss = all_dropped_coords[:, all_dropped_coords[crd_idx, :] == crd]
-                other_crd_range = range(np.amin(coordss[other_crd, :]), np.amax(coordss[other_crd, :]))
-                if coordss.size != other_crd_range.stop - other_crd_range.start:
-                    holes = [i for i in list(other_crd_range) if i not in coordss[other_crd, :]]
-                    holes = np.stack([holes, [crd for _ in holes]], axis=0)
-                    for hole in np.transpose(holes):
-                        self.patch_hole(np.flip(hole))
-                        holecount = holecount + 1
+        for ridx in range(self.coords_mins[1], self.coords_maxs[1]):
+            row = all_dropped_coords[:, all_dropped_coords[1, :] == ridx]
+            r_min = np.amin(row[0, :])
+            r_max = np.amax(row[0, :])
+            row_w = r_max - r_min
+            if row_w != row.size:
+                for x in range(r_min, r_max):
+                    coords = (x, ridx)
+                    if coords not in self:
+                        patch_success = self.patch_hole(coords)
+                        holecount = holecount + 1 if patch_success else holecount
+
         return holecount
 
+    def patch_hole(self, coords):
+        coords = tuple(coords)
+        assert coords not in self._defined_points
+
+        borders = self.identify_nearest_bordering_points(coords)
+
+        assert not all([b is None for b in borders]), "No borders found for point at %s" % (coords)
+
+        # check if coords are on same row/column
+        assert (borders[DIRECTION_RIGHT] is None or borders[DIRECTION_LEFT] is None) or borders[DIRECTION_RIGHT][1] == borders[DIRECTION_LEFT][1]
+        assert (borders[DIRECTION_UP] is None or borders[DIRECTION_DOWN] is None) or borders[DIRECTION_UP][0] == borders[DIRECTION_DOWN][0]
+
+        prospec_coords_x, prospec_coords_y, pin_point, hole_w, hole_h = None, None, None, None, None
+        if borders[DIRECTION_RIGHT] is not None and borders[DIRECTION_LEFT] is not None:
+            geo_distance = self.geo_coords_distance(borders[DIRECTION_LEFT], borders[DIRECTION_RIGHT])
+            hole_w = self.idx_distance(borders[DIRECTION_RIGHT], coords, single_value=True)
+            rel_from_start =  hole_w / self.idx_distance(borders[DIRECTION_RIGHT], borders[DIRECTION_LEFT], single_value=True)
+            prospec_coords_x = self[borders[DIRECTION_RIGHT]].geoCoords() + geo_distance * rel_from_start
+
+        # if spacing is vertical
+        if borders[DIRECTION_UP] is not None and borders[DIRECTION_DOWN] is not None:
+            geo_distance = self.geo_coords_distance(borders[DIRECTION_DOWN], borders[DIRECTION_UP])
+            hole_h = self.idx_distance(borders[DIRECTION_UP], coords, single_value=True)
+            rel_from_start =  hole_h / self.idx_distance(borders[DIRECTION_UP], borders[DIRECTION_DOWN], single_value=True)
+            prospec_coords_y = self[borders[DIRECTION_UP]].geoCoords() + geo_distance * rel_from_start
+
+        assert prospec_coords_x is not None or prospec_coords_y is not None
+
+        # if the hole is larger than the maximum patch size, return False
+        if (hole_w > self.patch_size or prospec_coords_x is None) and (hole_h > self.patch_size or prospec_coords_y is None):
+            return False
+
+        if prospec_coords_x is not None and prospec_coords_y is not None:
+            pin_point = np.mean(np.stack([np.array(prospec_coords_x), np.array(prospec_coords_y)]), axis=0)
+        elif prospec_coords_x is not None:
+            pin_point = prospec_coords_x
+        else:
+            assert prospec_coords_y is not None
+            pin_point = prospec_coords_y
+
+        if coords not in self:
+            self._defined_points[coords] = PinDropperPin(*coords, None, None)
+        self.drop_pin_at(self[coords], *pin_point)
+        # if hole was successfully patched, return true
+        return True
+
+    def identify_nearest_bordering_points(self, coords):
+        borders = [coords, coords, coords, coords]
+
+        # find nearest defines dpoint in each direction
+        for direction in range(NUM_DIRECTIONS):
+            while borders[direction] not in self._defined_points:  # scary while-loop
+                borders[direction] = tuple(np.add(np.array(borders[direction]), np.array(DIRECTIONS[direction])))
+                # if borders[direction] not in self._defined_points:
+                if borders[direction][0] > self.coords_maxs[0] or \
+                        borders[direction][1] > self.coords_maxs[1] or \
+                        self.coords_mins[0] > borders[direction][0] or \
+                        self.coords_mins[1] > borders[direction][1]:
+                    borders[direction] = None
+                    break
+
+        return borders
+
     def relativize_coords(self):
-        all_dropped_coords = np.stack(self._defined_points.keys(), axis=-1)
-        # x_vals = np.unique(all_dropped_coords[0, :])
-        # y_vals = np.unique(all_dropped_coords[1, :])
-        x_vals = [all_dropped_coords[0, all_dropped_coords[1, :] == y] for y in np.unique(all_dropped_coords[1, :])]
-        y_vals = [all_dropped_coords[1, all_dropped_coords[0, :] == x] for x in np.unique(all_dropped_coords[0, :])]
-        print("x values for ys: " + str(x_vals))
-        print("y values for xs: " + str(y_vals))
-
-        xmins = np.array([min(xs) for xs in x_vals])
-        ymins = np.array([min(ys) for ys in y_vals])
-
+        row_mins, _, col_mins, _ = self.calc_grid_dimensions()
         points = self._defined_points.values()
         adjusted_points = {}
         for pin in points:
-            pin.relativize(xmins[pin.y_index()], ymins[pin.y_index()])
+            # assume that each row starts at zero but that row numbering starts at the lowest row
+            pin.relativize(row_mins[pin.y_index() - self.coords_mins[1]], self.coords_mins[1])
             adjusted_points[pin.coords_indexes()] = pin
 
         self._defined_points = adjusted_points
+
+        # coords_mins and coords_maxs are each 1-D 2-length arrays of x and y
+        self.refresh_mins_maxs()
+
+    def calc_grid_dimensions(self):
+        all_dropped_coords = self.points_as_array()
+        x_vals = [all_dropped_coords[0, all_dropped_coords[1, :] == y] for y in np.unique(all_dropped_coords[1, :])]
+        y_vals = [all_dropped_coords[1, all_dropped_coords[0, :] == x] for x in np.unique(all_dropped_coords[0, :])]
+        row_mins = np.array([min(xs) for xs in x_vals])
+        col_mins = np.array([min(ys) for ys in y_vals])
+        row_maxs = np.array([max(xs) for xs in x_vals])
+        col_maxs = np.array([max(ys) for ys in y_vals])
+
+        return row_mins, row_maxs, col_mins, col_maxs
+
+    def refresh_mins_maxs(self):
+        all_dropped_coords = self.points_as_array()
+        # coords_mins and coords_maxs are each 1-D 2-length arrays of x and y
+        self.coords_mins = np.amin(all_dropped_coords, 1)
+        self.coords_maxs = np.amax(all_dropped_coords, 1)
 
     def add_pin_to_output(self, pin, data, count):
         feat = QgsFeature(id=count)
@@ -718,6 +781,14 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.sink.addFeature(feat)
         # print()
         return count + 1
+
+    def points_as_array(self):
+        """
+        returns the index coordinates of all points that have been dropped as an array
+        the 0 dimension of the array is a point vector (x,y)
+        the 1 dimension of the array is a list of the vectors
+        """
+        return np.stack(self._defined_points.keys(), axis=-1)
 
     def name(self):
         """
@@ -772,7 +843,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     def __getitem__(self, item):
         assert isinstance(item, tuple)
         assert len(item) == 2
-        assert item in self
+        assert item in self, "%s is not a defined point" % ([item])
         return self._defined_points[item]
 
     def drop_pin(self, point_candidate):
@@ -792,8 +863,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # ignore values with approximate values outside the bounding box
         if self.bound_box.contains(QgsPointXY(approx_geo_x, approx_geo_y)):
             if self.near_border(point_candidate.coords_indexes(), approx_geo_x, approx_geo_y):
-                point_candidate.status(PinDropperPin.STATUS_HOLE)
-                self._flagged_holes[point_candidate.coords_indexes()] = point_candidate
                 return False
             else:
                 if self.rate_offset_match is None:
@@ -814,9 +883,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                         self.drop_pin_at(point_candidate, geo_x, geo_y)
                         return True
                     else:
-                        # flag pin as hole TODO: figure out hole handling!
-                        point_candidate.status(PinDropperPin.STATUS_HOLE)
-                        # self._flagged_holes[point_candidate.coords_indexes()] = point_candidate
+                        # point is hole. will handle later.
                         return False
         else:  # if the loose end is outside the bounds of the network, flag it as a dead end
             point_candidate.status(PinDropperPin.STATUS_DEAD_END)
@@ -829,33 +896,37 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self._loose_ends.update(
             {p: new_loose_dict[p]
              for p in new_loose_dict
-             if p not in self._loose_ends and p not in self._flagged_holes and p not in self._defined_points}
+             if p not in self._loose_ends and p not in self._defined_points}
         )  # avoid adding multiple loose ends for the same x,y pair
 
     def is_do_patches(self):
         return self.patch_size > 0
 
     def near_border(self, point, x, y):
-        '''
-
-        '''
+        """
+        @param point the index coordinates of the point
+        @param x the approximate geo x-coordinate of the point
+        @param y the approximate geo y-coordinate of the point
+        @return true of the point is within one point-radius of the border, false otherwise
+        """
         if self.coords_mins is not None \
                 and np.all(self.coords_mins <= np.array(point)) \
                 and np.all(np.array(point) <= self.coords_maxs):
             return False
         pline = QgsGeometry.fromPolylineXY(self.bound_box.asPolygon()[0])
-        distance = pline.shortestLine(QgsGeometry.fromPointXY(QgsPointXY(x, y))).length()
-        return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2))
+        # distance = pline.shortestLine(QgsGeometry.fromPointXY(QgsPointXY(x, y))).length()
+        # return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2))
+        return QgsGeometry.fromPointXY(QgsPointXY(x,y)).within(pline)
 
     class SearchBox:
         def __init__(self, idx_radius, geo_center, context):
-            '''
+            """
             @param idx_radiuses: an x,y tuple in row, col index scalars of the x and y radii of the search box. does
             NOT have to be int values!
             @param geo_center: an x,y tuple in geocoords (using whatever CRS we're using for everything else) for the center
             of this search box.
             @return a list of x,y geo coordinates to search, with length subdiv^2
-            '''
+            """
             self.radius = idx_radius
             self.geo_center = geo_center
             # row_idx_coords = index within row, so x
@@ -1256,54 +1327,11 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             distance = np.linalg.norm(distance)
         return distance
 
-    def patch_hole(self, coords):
-        coords = tuple(coords)
-        assert coords not in self._defined_points
-
-        borders = [coords, coords, coords, coords]
-
-        # find nearest defines dpoint in each direction
-        for direction in range(NUM_DIRECTIONS):
-            while borders[direction] not in self._defined_points:
-                borders[direction] = tuple(np.add(np.array(borders[direction]), np.array(DIRECTIONS[direction])))
-                if borders[direction] not in self._defined_points:
-                # if borders[direction][0] > self.coords_maxs[0] or borders[direction][1] > self.coords_maxs[1] or self.coords_mins[0] > borders[direction][0] or self.coords_mins[1] > self.coords_mins[1]:
-                    borders[direction] = None
-                    break
-
-        # check if coords are on same row/column
-        assert (borders[DIRECTION_RIGHT] is None or borders[DIRECTION_LEFT] is None) or borders[DIRECTION_RIGHT][1] == borders[DIRECTION_LEFT][1]
-        assert (borders[DIRECTION_UP] is None or borders[DIRECTION_DOWN] is None) or borders[DIRECTION_UP][0] == borders[DIRECTION_DOWN][0]
-
-        prospec_coords_x, prospec_coords_y, pin_point = None, None, None
-        if borders[DIRECTION_RIGHT] is not None and borders[DIRECTION_LEFT] is not None:
-            geo_distance = self.geo_coords_distance(borders[DIRECTION_LEFT], borders[DIRECTION_RIGHT])
-            rel_from_start = self.idx_distance(borders[DIRECTION_RIGHT], coords, single_value=True) \
-                             / self.idx_distance(borders[DIRECTION_RIGHT], borders[DIRECTION_LEFT], single_value=True)
-            prospec_coords_x = self[borders[DIRECTION_RIGHT]].geoCoords() + geo_distance * rel_from_start
-
-        if borders[DIRECTION_UP] is not None and borders[DIRECTION_DOWN] is not None:
-            geo_distance = self.geo_coords_distance(borders[DIRECTION_DOWN], borders[DIRECTION_UP])
-            rel_from_start = self.idx_distance(borders[DIRECTION_UP], coords, single_value=True) \
-                             / self.idx_distance(borders[DIRECTION_UP], borders[DIRECTION_DOWN], single_value=True)
-            prospec_coords_y = self[borders[DIRECTION_UP]].geoCoords() + geo_distance * rel_from_start
-
-        if prospec_coords_x is not None and prospec_coords_y is not None:
-            pin_point = np.mean(np.array(prospec_coords_x), np.array(prospec_coords_y))
-        elif prospec_coords_x is not None:
-            pin_point = prospec_coords_x
-        else:
-            pin_point = prospec_coords_y
-
-        # self.drop_pin_at(self[coords], pin_point[0], pin_point[1])
-
-
 class PinDropperPin:
 
     STATUS_PIN = 0
     STATUS_LOOSE_END = 1
     STATUS_DEAD_END = 2
-    STATUS_HOLE = 3
 
     def __init__(self, x_index, y_index, parent, origin):
         # x and y are immutable
@@ -1313,7 +1341,7 @@ class PinDropperPin:
         self._geoX = None
         self._geoY = None
         self._adjs = [None for i in range(NUM_DIRECTIONS)]
-        if parent is not None: # parent will be none for the root pin
+        if parent is not None: # parent will be none for the root pin, or for patched holes
             self._adjs[origin] = parent
 
     def drop_geolocation(self, geoX, geoY):
@@ -1408,8 +1436,8 @@ class PinDropperPin:
             assert False
 
     def relativize(self, xmin, ymin):
-        self._x_index = self._x_index - xmin
-        self._y_index = self._y_index - ymin
+        self._x_index = self._x_index - xmin + 1  # index from 1
+        self._y_index = self._y_index - ymin + 1  # index from 1
 
     def __str__(self):
         return "Point with status %d at indexes %d, %d and geo coords %s with adjacent statuses %s, %s, %s, %s" \
