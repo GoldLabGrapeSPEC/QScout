@@ -262,7 +262,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.OVERLAY_MATCH_THRESHOLD_MIN_INPUT,
-                self.tr("Overlay Box Threshold"),
+                self.tr("Match Threshold"),
                 type=QgsProcessingParameterNumber.Double,
                 minValue=0,
                 maxValue=1,
@@ -283,7 +283,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         #optional parameters
         param = QgsProcessingParameterNumber(
             self.ROW_HEIGHT_STDEV_INPUT,
-            self.tr('Row Height Stdev'),
+            self.tr('Row Spacing Stdev'),
             type=QgsProcessingParameterNumber.Double,
             minValue=0,
             optional=True
@@ -1066,7 +1066,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             return 0
 
         difference = np.abs(compare.data(c_m)[clip] - target.data(t_m)[clip])
-        avg_difference = np.mean(difference)
+        avg_difference = np.mean(difference) / 255
         rating = 1.0 - avg_difference
         return rating
 
