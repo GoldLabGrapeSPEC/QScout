@@ -84,7 +84,8 @@ DTYPE_CONVERSIONS = {
             'i': (QVariant.Int, int),
             'u': (QVariant.Int, int),
             'f': (QVariant.Double, float),
-            'U': (QVariant.String, str)
+            'U': (QVariant.String, str),
+            'S': (QVariant.String, lambda x: x.decode("UTF-8"))
         }
 
 START_CORNERS = [
@@ -584,13 +585,13 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         fields_to_use_list = []
         if fields_to_use.strip():
-            fields_to_use_list = map(lambda x: x.strip(), fields_to_use.rsplit(','))
+            fields_to_use_list = list(map(lambda x: x.strip(), fields_to_use.rsplit(',')))
 
         # assign rating function
         if self.data_source.strip():
             fn = self.data_source
             # may raise exceptions. may have to improve descriptivensee of errors
-            input_data = np.genfromtxt(fn, delimiter=',', names=True)
+            input_data = np.genfromtxt(fn, delimiter=',', names=True, dtype=None)
             # TODO: maybe put all of this in load_input_data eventually
 
             # read input data analysis parameters
@@ -600,21 +601,18 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                              for i in range(len(input_data.dtype))
                              if ((not fields_to_use.strip()) or input_data.dtype.names[i] in fields_to_use_list)]
             if panel_size > 0:
-                attrs = attrs + [(COL_NAME, np.int16)]
+                attrs = attrs + [(COL_NAME, np.dtype(np.int16))]  # dtype not a huge deal here because it'll get set again a few lines down
                 self.input_col_attr_name = COL_NAME
                 self.col_attr_idx = len(attrs) - 1
             else:
                 col_regex = "([_\-\w]?[Cc]ol.?)|(.?[Nn]umber.?)"
                 self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, col_regex)
-                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or 'number'." \
+                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or 'number'. " \
                                                "Tip: if your data has a column for panels, you need to specify the panel size."
 
             row_regex = "[_\-\w]?[Rr]ow"
             self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, row_regex)
             assert self.row_attr_idx > -1, "No column in the attached file can be identified as 'row'"
-
-            attrs[self.row_attr_idx] = (attrs[self.row_attr_idx][0], np.dtype(np.int_))
-            attrs[self.col_attr_idx] = (attrs[self.col_attr_idx][0], np.dtype(np.int_))
 
             data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
 
@@ -638,6 +636,17 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             negative_rows = input_data[self.input_row_attr_name] < 0
             data[self.input_row_attr_name][negative_rows] = y_max + input_data[self.input_row_attr_name][negative_rows]
             data[self.input_row_attr_name][negative_rows == False] = input_data[self.input_row_attr_name][negative_rows == False]
+
+            # better way to do this than for-loop? IDK. using the _idx values breaks if not using all fields
+            for i in range(len(attrs)):
+                name, dt = attrs[i]
+                if name == self.input_row_attr_name or name == self.input_col_attr_name:
+                    attrs[i] = (name, np.dtype(np.int_))
+                    # assign indexes so they can be right when they're used to assign values in processAlgorithm
+                    if name == self.input_col_attr_name:
+                        self.col_attr_idx = i
+                    else:
+                        self.row_attr_idx = i
 
             for dt_name, _ in attrs:
                 if dt_name == self.input_col_attr_name or dt_name == self.input_col_attr_name:
@@ -806,7 +815,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
         feat.setAttributes(data)
         self.sink.addFeature(feat)
-        # print()
         return count + 1
 
     def points_as_array(self):
@@ -1204,45 +1212,12 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             self.a = context.raster_data[self._top_left_raster[0]:self._bottom_right_raster[0],
                                          self._top_left_raster[1]:self._bottom_right_raster[1], :]
 
-            if self.a.size == 0:
-                print(self._center)
-                print(x1, y1, x2, y2)
-                print(self._top_left_raster)
-                print(self._bottom_right_raster)
-
             # depending on which match rating algorithm is used, these may or may not ever be needed
             # calculate them on an as-needed basis
             self._min = None
             self._max = None
             self._norm = None
             self._gradients = None
-            # middle code. uses RasterDataProvider.block(). could not get to work because there's v. little documentation
-            # sample_width = int((2 * self.overlay_box_radius + 1) * self.overlay_box_sampling) # in num samples (pixels)
-            # num_bands = self.raster.dataProvider().bandCount()
-            # sample_data = np.zeros((sample_width, sample_width, num_bands))
-            # point1 = QgsPointXY(center_geo_x - self.overlay_box_radius * self.col_w, center_geo_y - self.overlay_box_radius * self.row_h)
-            # point2 = QgsPointXY(center_geo_x + self.overlay_box_radius * self.col_w, center_geo_y + self.overlay_box_radius * self.row_h)
-            # for band in range(num_bands):
-            #     sample_data[:, :, band] = self.raster.dataProvider().block(band, QgsRectangle(point1, point2), sample_width, sample_width).data()
-            # return sample_data
-
-            # old code. box aligns with field rows & columns, but FAR too computationally-intensive
-            # # print ("Taking samples of box centered at %f, %f with radius of %d points and %d total samples" %
-            # #        (center_geo_x, center_geo_y, sample_radius, sample_width * sample_width))
-            #
-            # # important note: row_sample_coord and col_sample_coord are in sampling units, not row/col units.
-            # # so to change them back to row/col units, you need to divide by self.overlay_box_sampling
-            # for row_sample_coord in range(-sample_radius, sample_radius):
-            #     for col_sample_coord in range(-sample_radius, sample_radius):
-            #         # and viola! x,y coords in raster units! probably!
-            #         # (multiply columns by rows and vice versa because it's row coordinate vs. column number and vice versa)
-            #         sample_geo_x = center_geo_x + (row_sample_coord * self.col_w_geo_dx + col_sample_coord * self.row_h_geo_dx) / self.overlay_box_sampling
-            #         sample_geo_y = center_geo_y + (row_sample_coord * self.col_w_geo_dy + col_sample_coord * self.row_h_geo_dy) / self.overlay_box_sampling
-            #         # print("Sample raster bands 1 - %d at %f,%f" % (num_bands, sample_geo_x, sample_geo_y))
-            #         bands = self.raster.dataProvider().identify(QgsPointXY(sample_geo_x, sample_geo_y), QgsRaster.IdentifyFormatValue).results()
-            #         bands = [bands[k] for k in bands]
-            #         sample_data[row_sample_coord + sample_radius, col_sample_coord + sample_radius, :] = bands
-            # return sample_data
 
         def data(self, margins=np.s_[:, :]):
             return self.a[margins]
