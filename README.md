@@ -1,5 +1,5 @@
 <h1>Pin Dropper</h1>
-<h2>Abstract></h2>
+<h2>Abstract</h2>
 Pin Dropper is a QGIS plugin for georeferencing field data with a particular focus on vinyards. The plugin can also be
 used to drop points on a field if no data is available.
 The program can be cloned from this repository or downloaded from the QGIS plugin manager (eventually)
@@ -16,7 +16,8 @@ The program can be cloned from this repository or downloaded from the QGIS plugi
 <i>Drop Data-Less Points</i> (Processing: <code>DROP_DATALESS_POINTS_INPUT</code>): Whether the program will drop points on plants that don't have any information provided in <i>Input Data</i>. If <i>Input Data</i> is not provided, this will be treated as True.
 <i>Row Spacing</i> (Processing: <code>ROW_HEIGHT_INPUT</code>): The distance between two rows, in the units of the CRS used by <i>Bound Box</i>
 <i>Point Interval</i> (Processing: <code>POINT_INTERVAL_INPUT</code>): The interval between points on a row. Functions similar to row height.
-<i>Match Threshold</i> (Processing: <code>OVERLAY_MATCH_THRESHOLD</code>): A value from 0.000 to 1.000. The threshold at which to declare an overlay box a match and drop a pin. How this number is applied depends on which <i>Rating Function</i> has been selected. The default value is completely arbitrary and has absolutely no mathematical or scientific significance.
+<i>Match Threshold</i> (Processing: <code>OVERLAY_MATCH_THRESHOLD_INPUT</code>): A value from 0.000 to 1.000. The threshold at which to declare an overlay box a match and drop a pin. How this number is applied depends on which <i>Rating Function</i> has been selected. The default value is completely arbitrary and has absolutely no mathematical or scientific significance.
+<i>Start Corner</i> (Processing: <code>START_CORNER_INPUT</code>): The corner of the field where the numbering starts. You would find row 1, plant 1 in this corner. For a better understanding of what "Top", "Bottom", "Left", and "Right" mean in this context, see the Usage Guide.
 <i>Output Layer</i> (Processing: <code>OUTPUT</code>): the layer that the program will output geometry to. leave blank to generate a new layer
 
 <h3>Advanced Parameters</h3>

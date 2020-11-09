@@ -87,6 +87,13 @@ DTYPE_CONVERSIONS = {
             'U': (QVariant.String, str)
         }
 
+START_CORNERS = [
+    "Bottom Left",
+    "Bottom Right",
+    "Top Left",
+    "Top Right"
+]
+
 class PinDropperAlgorithm(QgsProcessingAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
@@ -110,6 +117,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     RASTER_INPUT = 'RASTER_INPUT'
     BOUND_BOX_INPUT = 'BOUND_BOX_INPUT'
     PATCH_SIZE_INPUT = 'PATCH_SIZE_INPUT'
+    START_CORNER_INPUT = 'START_CORNER_INPUT'
     # row and point interval
     ROW_VECTOR_INPUT = 'R0W_VECTOR_INPUT'
     ROW_HEIGHT_INPUT = 'ROW_HEIGHT_INPUT'
@@ -118,7 +126,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     POINT_INTERVAL_STDEV_INPUT = 'POINT_INTERVAL_STDEV_INPUT'
     #overlay for comparisons between plants
     OVERLAY_BOX_RADIUS_INPUT = 'OVERLAY_BOX_RADIUS_INPUT'
-    OVERLAY_MATCH_THRESHOLD_MIN_INPUT = 'OVERLAY_MATCH_THRESHOLD_MIN_INPUT'
+    OVERLAY_MATCH_THRESHOLD_INPUT = 'OVERLAY_MATCH_THRESHOLD_INPUT'
     #parameters for searching for overlay matches
     SEARCH_NUM_ITERATIONS_INPUT = 'SEARCH_NUM_ITERATIONS_INPUT'
     SEARCH_ITERATION_SIZE_INPUT = 'SEARCH_ITERATION_SIZE_INPUT'
@@ -129,6 +137,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
     DATA_SOURCE_FIELDS_TO_USE = 'DATA_SOURCE_FIELDS_TO_USE'
 
     # testing parameters
+    RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
     RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
     PRECISION_BIAS_COEFFICIENT_INPUT = 'PRECISION_BIAS_COEFFICIENT_INPUT'
     COMPARE_FROM_ROOT_INPUT = 'COMPARE_FROM_ROOT'
@@ -261,12 +270,21 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.OVERLAY_MATCH_THRESHOLD_MIN_INPUT,
+                self.OVERLAY_MATCH_THRESHOLD_INPUT,
                 self.tr("Match Threshold"),
                 type=QgsProcessingParameterNumber.Double,
                 minValue=0,
                 maxValue=1,
                 defaultValue=.85,  # this number has absolutely no scientific or mathematical basis
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                self.START_CORNER_INPUT,
+                self.tr("Start Corner"),
+                options=START_CORNERS,
+                defaultValue=0
             )
         )
 
@@ -357,7 +375,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         # optional parameters
         row_h_stdev = self.parameterAsDouble(parameters, self.ROW_HEIGHT_STDEV_INPUT, context)
         point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
-        self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_MIN_INPUT,
+        self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_INPUT,
                                                                   context)
         self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
         self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
@@ -366,6 +384,8 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         self.rate_offset_match = list(self.MATCH_FUNCTIONS.values())[offset_func_idx]
         self.compare_from_root = self.parameterAsBool(parameters, self.COMPARE_FROM_ROOT_INPUT, context)
         self.precision_bias_coeff = self.parameterAsDouble(parameters, self.PRECISION_BIAS_COEFFICIENT_INPUT, context)
+
+        self.start_corner = self.parameterAsEnum(parameters, self.START_CORNER_INPUT, context)
 
         self.data_source = self.parameterAsFile(parameters, self.DATA_SOURCE_INPUT, context)
         self.drop_dataless_points = self.parameterAsBool(parameters, self.DROP_DATALESS_POINTS_INPUT, context)
@@ -747,12 +767,16 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         return borders
 
     def relativize_coords(self):
-        row_mins, _, col_mins, _ = self.calc_grid_dimensions()
+        flip_rows = self.start_corner % 2 != 0
+        flip_cols = self.start_corner > 1
+        row_mins, row_maxs, col_mins, col_maxs = self.calc_grid_dimensions()
         points = self._defined_points.values()
         adjusted_points = {}
         for pin in points:
             # assume that each row starts at zero but that row numbering starts at the lowest row
-            pin.relativize(row_mins[pin.y_index() - self.coords_mins[1]], self.coords_mins[1])
+            pin.relativize(row_mins[pin.y_index() - self.coords_mins[1]], row_maxs[pin.y_index() - self.coords_mins[1]],
+                           flip_rows,
+                           self.coords_mins[1], self.coords_maxs[1], flip_cols)
             adjusted_points[pin.coords_indexes()] = pin
 
         self._defined_points = adjusted_points
@@ -1438,9 +1462,15 @@ class PinDropperPin:
                   (self, loose_end_parent_rel, self._adjs[loose_end_parent_rel], str(self.coords_indexes()), loose_end, loose_end_parent))
             assert False
 
-    def relativize(self, xmin, ymin):
-        self._x_index = self._x_index - xmin + 1  # index from 1
-        self._y_index = self._y_index - ymin + 1  # index from 1
+    def relativize(self, xmin, xmax, flip_x, ymin, ymax, flip_y):
+        if not flip_x:
+            self._x_index = self._x_index - xmin + 1  # index from 1
+        else:
+            self._x_index = xmax - self._x_index + 1  # index from 1
+        if not flip_y:
+            self._y_index = self._y_index - ymin + 1  # index from 1
+        else:
+            self._y_index = ymax - self._y_index + 1  # index from 1
 
     def __str__(self):
         return "Point with status %d at indexes %d, %d and geo coords %s with adjacent statuses %s, %s, %s, %s" \
