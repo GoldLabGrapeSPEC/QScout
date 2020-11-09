@@ -582,10 +582,12 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             if panel_size > 0:
                 attrs = attrs + [(COL_NAME, np.int16)]
                 self.input_col_attr_name = COL_NAME
+                self.col_attr_idx = len(attrs) - 1
             else:
                 col_regex = "([_\-\w]?[Cc]ol.?)|(.?[Nn]umber.?)"
                 self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, col_regex)
-                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or 'number"
+                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or 'number'." \
+                                               "Tip: if your data has a column for panels, you need to specify the panel size."
 
             row_regex = "[_\-\w]?[Rr]ow"
             self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, row_regex)
@@ -596,6 +598,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
             data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
 
+            x_mins, x_maxs, y_mins, y_maxs = self.calc_grid_dimensions()
             if panel_size > 0:
                 panel_regex = ".?[Pp]anel.?"
                 panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, panel_regex)
@@ -605,15 +608,15 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                 assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
                 data[self.input_col_attr_name] = panel_size * input_data[panel_attr_name] + input_data[vine_attr_name]
             else:
-
-                col_max = np.amax(np.abs(input_data[self.input_col_attr_name]))
                 negative_cols = input_data[self.input_col_attr_name] < 0
-                data[self.input_col_attr_name][negative_cols] = col_max + input_data[self.input_col_attr_name][negative_cols]
+                x_data_neg = x_maxs[input_data[self.input_row_attr_name][negative_cols].astype(np.int_)] +\
+                             input_data[self.input_col_attr_name][negative_cols]
+                data[self.input_col_attr_name][negative_cols] = x_data_neg
                 data[self.input_col_attr_name][negative_cols == False] = input_data[self.input_col_attr_name][negative_cols == False]
 
-            row_max = np.amax(np.abs(input_data[self.input_row_attr_name]))
+            y_max = np.amax(y_maxs)
             negative_rows = input_data[self.input_row_attr_name] < 0
-            data[self.input_row_attr_name][negative_rows] = row_max + input_data[self.input_row_attr_name][negative_rows]
+            data[self.input_row_attr_name][negative_rows] = y_max + input_data[self.input_row_attr_name][negative_rows]
             data[self.input_row_attr_name][negative_rows == False] = input_data[self.input_row_attr_name][negative_rows == False]
 
             for dt_name, _ in attrs:
