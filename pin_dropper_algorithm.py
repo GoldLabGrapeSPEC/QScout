@@ -139,7 +139,6 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
     # testing parameters
     RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
-    RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
     PRECISION_BIAS_COEFFICIENT_INPUT = 'PRECISION_BIAS_COEFFICIENT_INPUT'
     COMPARE_FROM_ROOT_INPUT = 'COMPARE_FROM_ROOT'
 
@@ -845,7 +844,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         assert prospec_coords_x is not None or prospec_coords_y is not None
 
         # if the hole is larger than the maximum patch size, return False
-        if (hole_w > self.patch_size or prospec_coords_x is None) and (hole_h > self.patch_size or prospec_coords_y is None):
+        if ( prospec_coords_x is None or hole_w > self.patch_size) and (prospec_coords_y is None or hole_h > self.patch_size):
             return False
 
         # if has both horozontal and vertical borders
@@ -977,7 +976,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Drop Pins Semi-Regularly'
+        return 'Drop Pins'
 
     def displayName(self):
         """
@@ -1001,7 +1000,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Vector creation'
+        return 'QScout'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
@@ -1047,7 +1046,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
 
     def drop_pin(self, point_candidate):
         '''
-        evaluates a point candidate and drops a pin on it if it's within the bounds of the bounding box
+        evaluates a point candidate and drops a pin Dropon it if it's within the bounds of the bounding box
         @param point_candidate an instance of PinDropperPin with a status of STATUS_LOOSE_END
         '''
         parent, relation = point_candidate.parent_relation()
@@ -1082,17 +1081,20 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
                     point, rating = self.search(target, approx_geo_x, approx_geo_y)
                     # if rating is good, assign coords
                     if rating >= self.overlay_match_min_threshold:
-                        geo_x, geo_y = point
-                    # if rating is not good... I'm not sure what we're doing here? review.
-                    if rating < self.overlay_match_min_threshold and self.is_do_patches():
-                        geo_x, geo_y = approx_geo_x, approx_geo_y
-                    # this line of code is actually really bad and throws into question whether patches are even working right now
-                    # gotta handle asap
-                    if rating >= self.overlay_match_min_threshold or self.is_do_patches():
-                        self.drop_pin_at(point_candidate, geo_x, geo_y)
+                        self.drop_pin_at(point_candidate, *point)
+
                         return True
+                    # if rating is not good... I'm not sure what we're doing here? review.
+                    # if rating < self.overlay_match_min_threshold and self.is_do_patches():
+                    #     geo_x, geo_y = approx_geo_x, approx_geo_y
+                    # # this line of code is actually really bad and throws into question whether patches are even working right now
+                    # # gotta handle asap
+                    # if rating >= self.overlay_match_min_threshold or self.is_do_patches():
+                    #     self.drop_pin_at(point_candidate, geo_x, geo_y)
+                    #     return True
                     else:
                         # point is hole. will handle later.
+                        point_candidate.status(PinDropperPin.STATUS_HOLE)
                         return False
         else:  # if the loose end is outside the bounds of the network, flag it as a dead end
             point_candidate.status(PinDropperPin.STATUS_DEAD_END)
@@ -1124,7 +1126,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
             return False
         pline = QgsGeometry.fromPolylineXY(self.bound_box.asPolygon()[0])
         # distance = pline.shortestLine(QgsGeometry.fromPointXY(QgsPointXY(x, y))).length()
-        # return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2))
+        # return distance < math.sqrt(math.pow(self.row_h, 2) + math.pow(self.col_w, 2)) * .25
         return QgsGeometry.fromPointXY(QgsPointXY(x,y)).within(pline)
 
     class SearchBox:
@@ -1517,7 +1519,7 @@ class PinDropperAlgorithm(QgsProcessingAlgorithm):
         if absolute:
             distance = np.abs(distance)
         if single_value:
-            distance = np.linalg.norm(distance)
+            distance = math.sqrt(math.pow(distance[0], 2) + math.pow(distance[1], 2))
         return distance
 
 class PinDropperPin:
@@ -1525,6 +1527,7 @@ class PinDropperPin:
     STATUS_PIN = 0
     STATUS_LOOSE_END = 1
     STATUS_DEAD_END = 2
+    STATUS_HOLE = 3
 
     def __init__(self, x_index, y_index, parent, origin):
         # x and y are immutable

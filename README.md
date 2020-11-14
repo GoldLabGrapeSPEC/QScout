@@ -54,3 +54,5 @@ All these functions were developed by me. I'd be very interested to see what an 
 
 <h2>FAQ</h2>
 Let me know if you have any questions, which will then become 'frequently asked'
+
+<h2>Troubleshooting</h2>

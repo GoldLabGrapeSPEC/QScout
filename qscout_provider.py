@@ -32,9 +32,10 @@ __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
 from .pin_dropper_algorithm import PinDropperAlgorithm
+from .pin_locator_algorithm import PinLocatorAlgorithm
 
 
-class PinDropperProvider(QgsProcessingProvider):
+class QScoutProvider(QgsProcessingProvider):
 
     def __init__(self):
         """
@@ -54,6 +55,7 @@ class PinDropperProvider(QgsProcessingProvider):
         Loads all algorithms belonging to this provider.
         """
         self.addAlgorithm(PinDropperAlgorithm())
+        self.addAlgorithm(PinLocatorAlgorithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())
 
@@ -63,7 +65,7 @@ class PinDropperProvider(QgsProcessingProvider):
         string should be a unique, short, character only string, eg "qgis" or
         "gdal". This string should not be localised.
         """
-        return 'Pin Dropper'
+        return 'QScout'
 
     def name(self):
         """
@@ -72,7 +74,7 @@ class PinDropperProvider(QgsProcessingProvider):
 
         This string should be short (e.g. "Lastools") and localised.
         """
-        return self.tr('Pin Dropper')
+        return self.tr('QScout')
 
     def icon(self):
         """

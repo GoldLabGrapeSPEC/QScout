@@ -35,5 +35,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    from .pin_dropper import PinDropperPlugin
-    return PinDropperPlugin()
+    from .qscout import QScoutPlugin
+    return QScoutPlugin()
