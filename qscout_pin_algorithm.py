@@ -623,6 +623,14 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
         """
         return len(self._defined_points)
 
+    def points_as_array(self):
+        """
+        returns the index coordinates of all points that have been dropped as an array
+        the 0 dimension of the array is a point vector (x,y)
+        the 1 dimension of the array is a list of the vectors
+        """
+        return np.stack(self._defined_points.keys(), axis=-1)
+
     def __contains__(self, item):
         """
         Returns true if the pair of coords passed is a key in the defined points dict, indicating that it has been

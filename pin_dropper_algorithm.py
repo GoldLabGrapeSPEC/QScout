@@ -324,14 +324,6 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         self.sink.addFeature(feat)
         return count + 1
 
-    def points_as_array(self):
-        """
-        returns the index coordinates of all points that have been dropped as an array
-        the 0 dimension of the array is a point vector (x,y)
-        the 1 dimension of the array is a list of the vectors
-        """
-        return np.stack(self._defined_points.keys(), axis=-1)
-
     def name(self):
         """
         Returns the algorithm name, used for identifying the algorithm. This

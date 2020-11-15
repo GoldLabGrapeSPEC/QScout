@@ -1,16 +1,34 @@
-from PyQt5.QtCore import QCoreApplication
-from qgis.core import (QgsProcessingParameterDefinition, QgsProcessingParameterFeatureSource)
+from PyQt5.QtCore import QCoreApplication, QVariant
+from qgis.core import (QgsProcessingParameterFeatureSource, QgsFields, QgsField, QgsProcessing, QgsProject, QgsCoordinateTransform,
+                       QgsWkbTypes, QgsFeatureSink, QgsProcessingParameterFeatureSink, QgsFeature, QgsGeometry)
 from .qscout_pin_algorithm import QScoutPinAlgorithm
+
 
 class PinLocatorAlgorithm(QScoutPinAlgorithm):
 
     POINTS_INPUT = 'POINTS_INPUT'
+    POINTS_OUTPUT = 'POINTS_OUTPUT'
+
+    COL_FIELD_NAME = 'plant'
+    ROW_FIELD_NAME = 'row'
+    OFFSET_FIELD_NAME = 'offset'
+
 
     def initAlgorithm(self, config):
         super().initAlgorithm(config)
 
-        self.addParameter(QgsProcessingParameterFeatureSource(
+        self.addParameter(
+            QgsProcessingParameterFeatureSource(
+                self.POINTS_INPUT,
+                self.tr("Points to Index"),
+                [QgsProcessing.TypeVectorPoint]
+            )
+        )
 
+        self.addParameter(
+            QgsProcessingParameterFeatureSink(
+                self.POINTS_OUTPUT,
+                self.tr("Indexes Points")
             )
         )
 
@@ -26,70 +44,78 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
         # this also includes orienting the coordinates according to the user's preferance
         self.relativize_coords()
 
-        # load input data
-        data, attrs = self.load_input_data(parameters, context)
+        points_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
 
-        # set up fields for output layer
-        out_fields = QgsFields()
-        for n, dt in attrs:
-            out_fields.append(QgsField(name=n, type=dt))
+        # convert row vector to the same CRS as the bounding box
+        need_correct_crs = False
+        if points_layer.crs().authid() != self.bound_box_layer.crs().authid():
+            need_correct_crs = True
+            coord_transformer = QgsCoordinateTransform(points_layer.crs(), self.bound_box_layer.crs(),
+                                                       QgsProject.instance().transformContext())
 
-        # Retrieve the feature source and sink. The 'dest_id' variable is used
-        # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
-        (self.sink, dest_id) = self.parameterAsSink(
+        points_data_provider = points_layer.dataProvider()
+
+        new_fields = QgsFields(points_data_provider.fields())
+
+        assert new_fields.append(QgsField(name=self.COL_FIELD_NAME, type=QVariant.Int)), \
+            "Field name %s already in use." % self.COL_FIELD_NAME
+        assert new_fields.append(QgsField(name=self.ROW_FIELD_NAME, type=QVariant.Int)), \
+            "Field name %s already in use." % self.ROW_FIELD_NAME
+        assert new_fields.append(QgsField(name=self.OFFSET_FIELD_NAME, type=QVariant.Double)), \
+            "Field name %s already in use." % self.OFFSET_FIELD_NAME
+
+        (sink, dest_id) = self.parameterAsSink(
             parameters,
-            self.OUTPUT,
+            self.POINTS_OUTPUT,
             context,
-            fields=out_fields,
+            fields=new_fields,
             geometryType=QgsWkbTypes.Point,
             crs=self.bound_box_layer.crs(),
             sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
 
-        # read values from source csv file
-        # (for now generate random values from 1 to 5)
+        x_field = new_fields.indexOf(self.COL_FIELD_NAME)
+        y_field = new_fields.indexOf(self.ROW_FIELD_NAME)
+        offset_field = new_fields.indexOf(self.OFFSET_FIELD_NAME)
 
-        # set output field values
         count = 0
-        already_dropped = []
-        not_dropped = []
-        # first loop. add points from input data
-        if data is not None:
-            for entry in data:
-                coords = (entry[self.input_col_attr_name], entry[self.input_row_attr_name])
-                if coords in self._defined_points:
-                    pin = self[coords]
-                    # do conversions. qgis uses gdal, which is *VERY* finicky about fata types. gotta make sure
-                    # data types are Python types, not numpy types.
-                    vals = [DTYPE_CONVERSIONS[data.dtype[i].kind][1](entry[i]) for i in range(len(data.dtype))]
-                    # add pin
-                    count = self.add_pin_to_output(pin, vals, count)
-                    # flag as dropped
-                    already_dropped.append(coords)
-                else:
-                    # flag point as not in dropped points
-                    not_dropped.append(coords)
+        num_feature = points_data_provider.featureCount()
 
-        # second loop. add points not in input data
-        if self.drop_dataless_points or data is None:
-            for coords in self._defined_points:
-                if coords not in already_dropped:  # don't re-add points from last loop
-                    entry = [np.nan for _ in attrs]
-                    # set col and row values
-                    entry[self.col_attr_idx] = int(coords[0])
-                    entry[self.row_attr_idx] = int(coords[1])
-                    count = self.add_pin_to_output(self[coords], entry, count)
+        feedback.setProgress(0)
 
-        for d in not_dropped:  # output non-dropped data in input data
-            feedback.pushInfo("Did not drop coordinates for %d, %d." % d)
+        for src_feature in points_layer.getFeatures():
+            count = count + 1
+            point = src_feature.geometry().asPoint()
+            if need_correct_crs:
+                point = coord_transformer.transform(point)
+            x, y, distance = self.reverseLocatePoint(point)
+            feature = QgsFeature(new_fields, id=src_feature.id())
+            for f in points_data_provider.fields().names():
+                feature.setAttribute(new_fields.indexOf(f), feature[f])
+            feature.setAttribute(x_field, int(x))
+            feature.setAttribute(y_field, int(y))
+            feature.setAttribute(offset_field, float(distance))
+            feature.setGeometry(QgsGeometry.fromPointXY(point))
+            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+            feedback.setProgress(100 * count / num_feature)
+            if count % int(num_feature / 10) == 0:
+                feedback.setProgressText("Located %d of %d" % (count, num_feature))
 
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
+        return {self.POINTS_OUTPUT: dest_id}  # no output
+
+    def reverseLocatePoint(self, point):
+
+        best_distance = None
+        best_coords = None
+
+        # O(N) algorithm. It might work for the scales we're dealing with but I can do better.
+        for coords in self._defined_points.keys():
+            distance = point.distance(*self[coords].geoCoords())
+            if best_distance is None or best_distance > distance:
+                best_distance = distance
+                best_coords = coords
+
+        return *best_coords, best_distance
+
 
     def name(self):
         """
