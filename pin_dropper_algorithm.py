@@ -332,7 +332,10 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Drop Pins'
+        return 'droppins'
+
+    def displayName(self):
+        return self.tr("Drop Pins")
 
     def createInstance(self):
         return PinDropperAlgorithm()

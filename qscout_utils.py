@@ -1,3 +1,4 @@
+from PyQt5.QtCore import QVariant
 import numpy as np
 
 DIRECTION_RIGHT = 0
@@ -12,6 +13,17 @@ DIRECTIONS = (
     (0, -1)
 )
 
+# for converting from numpy types to QVariants used by QGIS or Python data types that go into the QVariants
+DTYPE_CONVERSIONS = {
+            '?': (QVariant.Bool, bool),
+            'b': (QVariant.Int, int),
+            'B': (QVariant.Int, int),
+            'i': (QVariant.Int, int),
+            'u': (QVariant.Int, int),
+            'f': (QVariant.Double, float),
+            'U': (QVariant.String, str),
+            'S': (QVariant.String, lambda x: x.decode("UTF-8"))
+        }
 
 def calc_margins(sample1, sample2):
     """

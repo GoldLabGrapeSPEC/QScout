@@ -26,17 +26,7 @@ from . import match_functions # import package, not specifics
 ROW_NAME = 'row'
 COL_NAME = 'col'
 
-# for converting from numpy types to QVariants used by QGIS or Python data types that go into the QVariants
-DTYPE_CONVERSIONS = {
-            '?': (QVariant.Bool, bool),
-            'b': (QVariant.Int, int),
-            'B': (QVariant.Int, int),
-            'i': (QVariant.Int, int),
-            'u': (QVariant.Int, int),
-            'f': (QVariant.Double, float),
-            'U': (QVariant.String, str),
-            'S': (QVariant.String, lambda x: x.decode("UTF-8"))
-        }
+
 
 MATCH_FUNCTIONS = {"Regular": None, **match_functions.MATCH_FUNCTIONS}
 
@@ -582,19 +572,12 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
 
         return borders
 
-    def displayName(self):
-        """
-        Returns the translated algorithm name, which should be used for any
-        user-visible display of the algorithm name.
-        """
-        return self.tr(self.name())
-
     def group(self):
         """
         Returns the name of the group this algorithm belongs to. This string
         should be localised.
         """
-        return self.tr(self.groupId())
+        return self.tr("QScout")
 
     def groupId(self):
         """
@@ -604,7 +587,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'QScout'
+        return 'qscout'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)

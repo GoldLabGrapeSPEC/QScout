@@ -1,3 +1,12 @@
+__author__ = 'Joshua Evans'
+__date__ = '2020-11-15'
+__copyright__ = '(C) 2020 by Joshua Evans'
+
+# This will get replaced with a git SHA1 when you do a git archive
+
+__revision__ = '$Format:%H$'
+
+
 from PyQt5.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessingParameterFeatureSource, QgsFields, QgsField, QgsProcessing, QgsProject, QgsCoordinateTransform,
                        QgsWkbTypes, QgsFeatureSink, QgsProcessingParameterFeatureSink, QgsFeature, QgsGeometry)
@@ -125,21 +134,21 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'Locate Pins in Field'
+        return 'locatepinsinfield'
 
     def displayName(self):
         """
         Returns the translated algorithm name, which should be used for any
         user-visible display of the algorithm name.
         """
-        return self.tr(self.name())
+        return self.tr("Locate Pins in Field")
 
     def group(self):
         """
         Returns the name of the group this algorithm belongs to. This string
         should be localised.
         """
-        return self.tr(self.groupId())
+        return self.tr("QScout")
 
     def groupId(self):
         """
@@ -149,7 +158,7 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
         contain lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'QScout'
+        return 'qscout'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
