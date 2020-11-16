@@ -11,12 +11,13 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsFields,
                        QgsField)
 
+from .raster_plugin import QScoutRasterPlugin
+
 import traceback
 import geopandas as gpd
-from rasterio import warp
-from rasterio.crs import CRS
 
-class ValueGrabberAlgorithm(QgsProcessingAlgorithm):
+
+class ValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
 
     POINTS_INPUT = 'POINTS_INPUT'
     RASTER_INPUT = 'RASTER_INPUT'
@@ -50,24 +51,15 @@ class ValueGrabberAlgorithm(QgsProcessingAlgorithm):
         points_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
         raster_file =self.parameterAsFile(parameters, self.RASTER_INPUT, context)
 
-        vector_data = gpd.read_file(points_layer.dataProvider().dataSourceUri())
-        self.rasterio_image = rasterio.open(raster_file)
+        # vector_data = gpd.read_file(points_layer.dataProvider().dataSourceUri())
 
-        self.gcs = str(vector_data.crs).upper()
-        lats = list(vector_data.lat)
-        lons = list(vector_data.lon)
+        self.load_raster_data(raster_file)
 
         output_fields = QgsFields()
         output_fields.extend(points_layer.fields())
 
-        try:
-            for bandIndex, band in enumerate(self.rasterio_image.read()):
-                output_fields.append(QgsField("Band_" + str(band), QVariant.Int))
-                feedback.pushInfo("Working on band... %s" % bandIndex)
-                vector_data["Band_" + str(bandIndex)] = self.spec_puller_by_band(band, lons, lats)
-        except IndexError:
-            feedback.pushInfo("Vector and Image don't overlap.")
-            feedback.pushInfo(traceback.print_exc())
+        for i in range(self.raster_data.shape[2]):
+            output_fields.append(QgsField(band_field(i), QVariant.Int))
 
         (sink, dest_id) = self.parameterAsSink(
             parameters,
@@ -77,15 +69,30 @@ class ValueGrabberAlgorithm(QgsProcessingAlgorithm):
             geometryType=QgsWkbTypes.Point,
             crs=points_layer.crs(),
             sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
+        #
+        # try:
+        #     for bandIndex, band in enumerate(self.rasterio_image.read()):
+        #         output_fields.append(QgsField(band_field(i), QVariant.Int))
+        #         feedback.pushInfo("Working on band... %s" % bandIndex)
+        #         vector_data["Band_" + str(bandIndex)] = self.spec_puller_by_band(band, lons, lats)
+        # except IndexError:
+        #     feedback.pushInfo("Vector and Image don't overlap.")
+        #     feedback.pushInfo(traceback.print_exc())
 
         count = 0
-        for in_feat in points_layer.features():
-            feature = QgsFeature(fields=output_fields, id=count)
-            for field in output_fields.names():
-                feature.setAttribute(field, vector_data[field][count])
-            feature.setGeometry(in_feat.geometry())
-            sink.addFeature(feature)
-            count = count + 1
+        try:
+            for in_feat in points_layer.getFeatures():
+                feature = QgsFeature(output_fields, count)
+                for field in in_feat.fields().names():
+                    feature.setAttribute(field, in_feat[field])
+                for band in range(self.raster_data.shape[2]):
+                    feature.setAttribute(band_field(band), self.query_raster(in_feat.geometry().asPoint(), band))
+                feature.setGeometry(in_feat.geometry())
+                sink.addFeature(feature)
+                count = count + 1
+        except IndexError:
+            feedback.pushInfo("Vector and Image don't overlap.")
+            feedback.pushInfo(traceback.print_exc())
 
         return {self.POINTS_OUTPUT: dest_id}
 
@@ -129,17 +136,9 @@ class ValueGrabberAlgorithm(QgsProcessingAlgorithm):
     def createInstance(self):
         return ValueGrabberAlgorithm()
 
-    def spec_puller_by_band(self, band, lon, lat):
-        ''' This function takes a matrix of coordinates and pulls the value at
-        overlap with the specified band/channel.
-        raster = raster opened by rasterio
-        band = number of band
-        lat, lon = list of coordinates
-        gcs = Geographic Coordinate System of points'''
+    def query_raster(self, point, band):
+        raster_x, raster_y = self.as_raster_coords(point.x(), point.y())
+        return int(self.raster_data[raster_x, raster_y, band])
 
-        x_coords, y_coords = warp.transform(src_crs = CRS.from_string(self.gcs), dst_crs=self.raster.crs,
-                                            xs=lon, ys=lat)
-
-        row, col = self.raster.index(x_coords, y_coords)
-
-        return band[row, col]
+def band_field(i):
+    return "Band_" + str(i+1)

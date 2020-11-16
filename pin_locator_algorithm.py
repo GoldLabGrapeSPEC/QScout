@@ -45,9 +45,7 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
         """
         Here is where the processing itself takes place.
         """
-        self.preProcessAlgorithm(parameters, context)
-
-        self.locatePoints(feedback)
+        super().processAlgorithm(parameters, context, feedback)
 
         # 'relativize' the coordinates, so x and y both start at 1
         # this also includes orienting the coordinates according to the user's preferance
@@ -98,8 +96,9 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
                 point = coord_transformer.transform(point)
             x, y, distance = self.reverseLocatePoint(point)
             feature = QgsFeature(new_fields, id=src_feature.id())
+
             for f in points_data_provider.fields().names():
-                feature.setAttribute(new_fields.indexOf(f), feature[f])
+                feature.setAttribute(new_fields.indexOf(f), src_feature[f])
             feature.setAttribute(x_field, int(x))
             feature.setAttribute(y_field, int(y))
             feature.setAttribute(offset_field, float(distance))

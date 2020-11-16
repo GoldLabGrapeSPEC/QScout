@@ -1,9 +1,11 @@
 from qgis.core import QgsProcessingAlgorithm
 from .grid_aggregator_algorithm import *
+from .qscout_pin_algorithm import QScoutPinAlgorithm
 
-class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
+class DropAndGrabAlgoithm(QScoutPinAlgorithm):
     def initAlgorithm(self, config):
-        pass
+        super().initAlgorithm(config)
+
     def processAlgorithm(self, parameters, context, feedback):
         pass
 

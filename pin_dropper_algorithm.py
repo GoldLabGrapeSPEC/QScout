@@ -118,9 +118,7 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         """
         Here is where the processing itself takes place.
         """
-        self.preProcessAlgorithm(parameters, context)
-
-        self.locatePoints(feedback)
+        super().processAlgorithm(parameters, context, feedback)
 
         # 'relativize' the coordinates, so x and y both start at 1
         # this also includes orienting the coordinates according to the user's preferance

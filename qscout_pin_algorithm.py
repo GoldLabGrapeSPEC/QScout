@@ -4,7 +4,7 @@ import re
 from osgeo import gdal
 from time import time
 
-from PyQt5.QtCore import QCoreApplication, QVariant
+from PyQt5.QtCore import QCoreApplication
 from qgis.core import (QgsProcessingAlgorithm,
                        QgsProcessing,
                        QgsProject,
@@ -20,6 +20,7 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsGeometry)
 
 from .qscout_utils import *
+from .raster_plugin import QScoutRasterPlugin
 
 from . import match_functions # import package, not specifics
 
@@ -37,7 +38,8 @@ START_CORNERS = [
     "Top Right"
 ]
 
-class QScoutPinAlgorithm(QgsProcessingAlgorithm):
+
+class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
     # PARAMETERS
 
     # basics
@@ -277,38 +279,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
         if point_interval_stdev > 0:
             self.col_w_stdev = point_interval_stdev / self.col_w
 
-    def load_raster_data(self):
-        """
-        using gdal, loads raster data from file specified in parameters.
-        assigns class attributes self.raster_data, self.band_ranges, and self.raster_transform
-        """
-        # use gdal to open raster layer
-        ds = gdal.Open(self.raster.dataProvider().dataSourceUri())
-        # oddly specific error message is oddly specific for the reason you're guessing
-        assert ds is not None, "Raster layer data provider URI not accessable, or something like that. You probably " \
-                               "forgot to tell the program not to use the Google Maps layer again."
-        # create raster data array
-        self.raster_data = np.stack([
-            ds.GetRasterBand(band+1).ReadAsArray()
-            for band
-            in range(self.raster.dataProvider().bandCount())
-        ], axis=-1)
-
-        # calculate band ranges. important for some algorithms
-        self.band_ranges = np.stack([
-            np.amin(self.raster_data, axis=tuple(range(len(self.raster_data.shape) - 1))),
-            np.amax(self.raster_data, axis=tuple(range(len(self.raster_data.shape) - 1)))
-        ], axis=-1)
-
-        # i'm... not actually sure what's going on in this code I wrote, but it works and I'm afraid to touch it
-        blank_axes = self.band_ranges[:, 0] != self.band_ranges[:, 1]
-        self.raster_data = np.transpose(self.raster_data[:, :, blank_axes], axes=(1, 0, 2))
-        self.band_ranges = self.band_ranges[blank_axes, :]
-        # save raster transform
-        self.raster_transform = ds.GetGeoTransform()
-        del ds  # save memory
-
-    def preProcessAlgorithm(self, parameters, context):
+    def processAlgorithm(self, parameters, context, feedback):
         # declare algorithm parameters, mainly just so we have them all in on place
         self._root = None
         self.bound_box = None
@@ -327,7 +298,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
         self.load_params(parameters, context)
 
         if self.rate_offset_match is not None:
-            self.load_raster_data()
+            self.load_raster_data(self.raster.dataProvider().dataSourceUri())
 
         # convert row vector to the same CRS as the bounding box
         row_vector_geom = list(self.row_vector_layer.getFeatures())[0].geometry()
@@ -374,6 +345,8 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
             # not sure under what circumstances it would fail
             self_similarity = self.rate_offset_match(self, self._root_sample, self._root_sample)
             assert self_similarity > .975, "Self-similarity score: %s" % self_similarity
+
+        self.locatePoints(feedback)
 
     def locatePoints(self, feedback):
         # Compute the number of steps to display within the progress bar
@@ -893,8 +866,8 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
             self._bottom_right_geo = [center_geo_x + context.overlay_box_radius * context.col_w,
                                       center_geo_y - context.overlay_box_radius * context.row_h]
 
-            x1, y1 = context.asRasterCoords(*self._top_left_geo)
-            x2, y2 = context.asRasterCoords(*self._bottom_right_geo)
+            x1, y1 = context.as_raster_coords(*self._top_left_geo)
+            x2, y2 = context.as_raster_coords(*self._bottom_right_geo)
 
             self._top_left_raster = [x1, y1]
             self._bottom_right_raster = [x2, y2]
@@ -1040,18 +1013,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm):
             driver = None
 
             print(self._top_left_geo, self._bottom_right_geo)
-
-    def asRasterCoords(self, x_geo, y_geo):
-        x = (x_geo - self.raster_transform[0]) / self.raster_transform[1]
-        y = (y_geo - self.raster_transform[3]) / self.raster_transform[5]
-
-        # raster_bounds = self.raster.dataProvider().extent()
-        # x_rel = x_geo - raster_bounds.xMinimum()
-        # x = (x_rel / raster_bounds.width()) * self.raster_data.shape[0]
-        # y_rel = y_geo - raster_bounds.yMinimum()
-        # y = (y_rel / raster_bounds.height()) * self.raster_data.shape[1]
-
-        return int(round(x)), int(round(y))  # "int(round(...)) is redundant but the program gets mad if I don't
 
     def geo_coords_distance(self, c1, c2, absolute=False, single_value=False):
         if not isinstance(c1, QScoutPin):
