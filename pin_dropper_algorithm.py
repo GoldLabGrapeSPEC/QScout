@@ -43,6 +43,12 @@ from qgis.core import (
 
 from .qscout_pin_algorithm import *
 
+PANEL_REGEX = ".?[Pp]anel.?"
+COL_REGEX = "([_\-\w]?[Cc]ol.?)|([Nn]umber.?)"  # TODO: improve regex
+ROW_REGEX = "[_\-\w]?[Rr]ow"  # TODO: improve regex
+VINE_REGEX = ".?([Vv]ine)|([Pp]lant)"
+
+
 class PinDropperAlgorithm(QScoutPinAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
@@ -225,15 +231,13 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
                 self.col_attr_idx = len(attrs) - 1
             else:
                 # look for column or number
-                col_regex = "([_\-\w]?[Cc]ol.?)|(.?[Nn]umber.?)"  # TODO: improve regex
-                self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, col_regex)
+                self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, COL_REGEX)
                 assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or " \
                                                "'number'. Tip: if your data has a column for panels, you need to " \
                                                "specify the panel size."
 
 
-            row_regex = "[_\-\w]?[Rr]ow"  # TODO: improve regex
-            self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, row_regex)
+            self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, ROW_REGEX)
             assert self.row_attr_idx > -1, "No column in the attached file can be identified as 'row'"
 
             # make array for processed data
@@ -244,12 +248,12 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
 
             if panel_size > 0:
                 # grab panel stuff
-                panel_regex = ".?[Pp]anel.?"
-                panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, panel_regex)
+
+                panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, PANEL_REGEX)
                 assert panel_attr_idx > -1, "No column in the attached file can ve identified as 'panel'"
                 # grab vine/plant stuff
-                vine_regex = ".?([Vv]ine)|([Pp]lant).?"
-                vine_attr_name, vine_attr_idx = match_index(input_data.dtype.names, vine_regex)
+
+                vine_attr_name, vine_attr_idx = match_index(input_data.dtype.names, VINE_REGEX)
                 assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
                 # process panel/plant data
                 # TODO: implement negative value processing like for row and col inputs?
@@ -337,5 +341,3 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
 
     def createInstance(self):
         return PinDropperAlgorithm()
-
-

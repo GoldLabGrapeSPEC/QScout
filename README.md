@@ -13,7 +13,7 @@ used to drop points on a field if no data is available.</p>
 <h2>Parameters Reference</h2>
 <h3>Basic Parameters</h3>
 <ul>
-<li><i>Raster Layer</i> (Processing: <code>RASTER_INPUT</code>): The input raster for the program. Not required if <i>Rate Offset Match Function</i> is set to 'Regular'. IMPORTANT: the input raster must have the same CRS as the <i>Bounding Box</i></li>
+<li><i>Targeting Raster</i> (Processing: <code>TARGETING_RASTER_INPUT</code>): The input raster for the program. Not required if <i>Rate Offset Match Function</i> is set to 'Regular'. IMPORTANT: the input raster must have the same CRS as the <i>Bounding Box</i></li>
 <li><i>Bound Box</i> (Processing: <code>BOUND_BOX_INPUT</code>): A layer containing a polygon that the program will drop pins within.</li>
 <li><i>Row Vector</i> (Processing: <code>ROW_VECTOR_INPUT</code>): A direction vector, which the program takes in the form of a line, representing a row in the field. The first point in the line is the start point for the field, so this is also implicitly a position vector. Don't overthink this - just find a place where the raster is a clear pattern and draw a line along a row. If the CRS is different from BOUND_BOX_INPUT it will be automatically converted.</li>
 <li><i>Input Data</i> (Processing: <code>DATA_SOURCE_INPUT</code>): A csv file containing the data to georeference. If no file is provided, the program will drop a pin on everything it thinks is a plant. If a file is provided, the program will only drop pins on features described in the file.</li>

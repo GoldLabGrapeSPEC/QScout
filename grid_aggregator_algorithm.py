@@ -90,6 +90,9 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
         ag_idx = self.parameterAsEnum(parameters, self.AGGREGATION_FUNCTION_INPUT, context)
         aggregation_function = AGGREGATION_FUNCTIONS[list(AGGREGATION_FUNCTIONS.keys())[ag_idx]]
 
+        assert grid_w > 0, "Grid width must be greater than zero."
+        assert grid_h > 0, "Grid height must be greater than zero.s"
+
         bounds = points_layer.extent()
 
         output_fields = QgsFields()
@@ -149,7 +152,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'gridgrab'
+        return 'gridaggregator'
 
     def displayName(self):
         """
