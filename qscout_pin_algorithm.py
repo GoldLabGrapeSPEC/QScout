@@ -40,6 +40,21 @@ START_CORNERS = [
 
 
 class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
+    def __init__(self, *args, **kwargs):
+        super(QgsProcessingAlgorithm, self).__init__(*args, **kwargs)
+        self._root = None
+        self.bound_box = None
+        self._defined_points = {}
+        self._loose_ends = None
+        self.row_h_geo_dx = 0
+        self.row_h_geo_dy = 0
+        self.col_w_geo_dx = 0
+        self.col_w_geo_dy = 0
+        self.col_w_stdev = .05
+        self.row_h_stdev = .05
+        self.overlay_box_radius = 0
+        self.coords_mins = None
+        self.coords_maxs = None
     # PARAMETERS
 
     # basics
@@ -281,24 +296,14 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
 
     def processAlgorithm(self, parameters, context, feedback):
         # declare algorithm parameters, mainly just so we have them all in on place
-        self._root = None
-        self.bound_box = None
-        self._defined_points = {}
-        self._loose_ends = None
-        self.row_h_geo_dx = 0
-        self.row_h_geo_dy = 0
-        self.col_w_geo_dx = 0
-        self.col_w_geo_dy = 0
-        self.col_w_stdev = .05
-        self.row_h_stdev = .05
-        self.overlay_box_radius = 0
-        self.coords_mins = None
-        self.coords_maxs = None
+
         # read parameters
         self.load_params(parameters, context)
 
         if self.rate_offset_match is not None:
             self.load_raster_data(self.raster.dataProvider().dataSourceUri())
+            self.raster_crs_transform = QgsCoordinateTransform(self.bound_box_layer.crs(), self.raster_crs,
+                                                               QgsProject.instance().transformContext())
 
         # convert row vector to the same CRS as the bounding box
         row_vector_geom = list(self.row_vector_layer.getFeatures())[0].geometry()
@@ -309,8 +314,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             row_vector_geom.transform(coord_transformer)
 
         # process row vector
-        assert self.rate_offset_match is None or self.raster.crs().authid() == self.bound_box_layer.crs().authid(), \
-            "Raster layer must have same CRS as bounds vectory layer."
         row_vector = row_vector_geom.asMultiPolyline()[0]
         start = row_vector[0]
         stop = row_vector[len(row_vector) - 1]
@@ -866,8 +869,8 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             self._bottom_right_geo = [center_geo_x + context.overlay_box_radius * context.col_w,
                                       center_geo_y - context.overlay_box_radius * context.row_h]
 
-            x1, y1 = context.as_raster_coords(*self._top_left_geo)
-            x2, y2 = context.as_raster_coords(*self._bottom_right_geo)
+            x1, y1 = context.as_raster_coords(*self._top_left_geo, context.raster_crs_transform)
+            x2, y2 = context.as_raster_coords(*self._bottom_right_geo, context.raster_crs_transform)
 
             self._top_left_raster = [x1, y1]
             self._bottom_right_raster = [x2, y2]

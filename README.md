@@ -53,6 +53,9 @@ All these functions were developed by me. I'd be very interested to see what an 
 <i>Random</i>: Drops points randomly within the <i>Row Spacing Stdev</i> and <i>Point Interval Stdev</i>. I wrote this function during the development process to test if the other functions perform better than random chance, and have included it here on the off chance that someone may find an application for it.<br>
 
 <h2>FAQ</h2>
-Let me know if you have any questions, which will then become 'frequently asked'
+<b>Q:</b>"Why isn't my (1,1) point in the correct corner?"<br>
+<b>A:</b>You may have drawn the row vector in the opposite direction from what you meant. The row vector points left to right towards what would be 3:00 on a clock face. To fix this problem, you can either redraw the row vector or imagine that the entire map is rotated by 180 degrees. <br>
+<br>
+Let me know if you have any more questions, which will then become 'frequently asked'
 
 <h2>Troubleshooting</h2>
