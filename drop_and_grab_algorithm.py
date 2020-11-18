@@ -3,7 +3,7 @@ from qgis import processing
 from .qscout_pin_algorithm import *
 from .pin_dropper_algorithm import *
 from .grid_aggregator_algorithm import *
-from .value_grabber_algorithm import ValueGrabberAlgorithm
+from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 
 
 class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
@@ -182,7 +182,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # PIN DROPPER PARAMS
         # fields to use
         param = QgsProcessingParameterString(
-            PinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE,
+            QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE,
             self.tr("Fields to Use"),
             optional=True
         )
@@ -191,7 +191,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
 
         # panel size
         param = QgsProcessingParameterNumber(
-            PinDropperAlgorithm.PANEL_SIZE_INPUT,
+            QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT,
             self.tr("Panel Size"),
             minValue=0,
             defaultValue=0
@@ -202,7 +202,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # drop data-less points
         self.addParameter(
             QgsProcessingParameterBoolean(
-                PinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT,
+                QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT,
                 self.tr("Drop Data-less Points"),
                 defaultValue=False  # should maybe change to false in production version
             )
@@ -211,7 +211,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # input data
         self.addParameter(
             QgsProcessingParameterFile(
-                PinDropperAlgorithm.DATA_SOURCE_INPUT,
+                QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT,
                 self.tr("Input Data"),
                 optional=True
             )
@@ -221,7 +221,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # have to use QgsProcessingParameterFile to account for rasters too large to load in qgis
         self.addParameter(
             QgsProcessingParameterFile(
-                ValueGrabberAlgorithm.RASTER_INPUT,
+                QScoutValueGrabberAlgorithm.RASTER_INPUT,
                 self.tr("Raster File Input")
             )
         )
@@ -257,15 +257,15 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                ValueGrabberAlgorithm.POINTS_OUTPUT,
+                QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT,
                 self.tr("Points Output")
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                GridAggregatorAlgorithm.GRID_OUTPUT,
-                self.tr("Output Grid")
+                GridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT,
+                self.tr("Aggregate Grid")
             )
         )
 
@@ -295,10 +295,10 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         start_corner = self.parameterAsEnum(parameters, QScoutPinAlgorithm.START_CORNER_INPUT, context)
 
         # PIN DROPPER PARAMS
-        data_source = self.parameterAsFile(parameters, PinDropperAlgorithm.DATA_SOURCE_INPUT, context)
-        drop_dataless_points = self.parameterAsBool(parameters, PinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT, context)
-        fields_to_use = self.parameterAsString(parameters, PinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE, context)
-        panel_size = self.parameterAsInt(parameters, PinDropperAlgorithm.PANEL_SIZE_INPUT, context)
+        data_source = self.parameterAsFile(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT, context)
+        drop_dataless_points = self.parameterAsBool(parameters, QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT, context)
+        fields_to_use = self.parameterAsString(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE, context)
+        panel_size = self.parameterAsInt(parameters, QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT, context)
 
         pin_dropper_alg_params = {
             QScoutPinAlgorithm.TARGETING_RASTER_INPUT: target_raster,
@@ -317,24 +317,24 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QScoutPinAlgorithm.COMPARE_FROM_ROOT_INPUT: compare_from_root,
             QScoutPinAlgorithm.PRECISION_BIAS_COEFFICIENT_INPUT: precision_bias_coeff,
             QScoutPinAlgorithm.START_CORNER_INPUT: start_corner,
-            PinDropperAlgorithm.DATA_SOURCE_INPUT: data_source,
-            PinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT: drop_dataless_points,
-            PinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE: fields_to_use,
-            PinDropperAlgorithm.PANEL_SIZE_INPUT: panel_size,
-            PinDropperAlgorithm.OUTPUT: "memory:"  # I promise I read this somewhere
+            QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT: data_source,
+            QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT: drop_dataless_points,
+            QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE: fields_to_use,
+            QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT: panel_size,
+            QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT: "memory:"  # I promise I read this somewhere
         }
 
         pin_drop_out = processing.run("QScout:droppins", pin_dropper_alg_params,
                                       context=context, feedback=feedback, is_child_algorithm=True)
 
         # VALUE GRABBER PARAMS
-        vals_raster = self.parameterAsFile(parameters, ValueGrabberAlgorithm.RASTER_INPUT, context)
-        val_grab_pins = pin_drop_out[PinDropperAlgorithm.OUTPUT]
+        vals_raster = self.parameterAsFile(parameters, QScoutValueGrabberAlgorithm.RASTER_INPUT, context)
+        val_grab_pins = pin_drop_out[QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT]
 
         grab_alg_params = {
-            ValueGrabberAlgorithm.RASTER_INPUT: vals_raster,
-            ValueGrabberAlgorithm.POINTS_INPUT: val_grab_pins,
-            ValueGrabberAlgorithm.POINTS_OUTPUT: "memory:"
+            QScoutValueGrabberAlgorithm.RASTER_INPUT: vals_raster,
+            QScoutValueGrabberAlgorithm.POINTS_INPUT: val_grab_pins,
+            QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT: "memory:"
         }
 
         grab_alg_out = processing.runAndLoadResults("QScout:valuegrab", grab_alg_params,
@@ -345,7 +345,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         grid_h = self.parameterAsDouble(parameters, GridAggregatorAlgorithm.GRID_CELL_H_INPUT, context)
         ag_idx = self.parameterAsEnum(parameters, GridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT, context)
 
-        points_out = grab_alg_out[ValueGrabberAlgorithm.POINTS_OUTPUT]
+        points_out = grab_alg_out[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT]
 
         # this is a bit wonky
         fields_to_use = map(lambda f: f.strip(), fields_to_use.split(","))
@@ -356,18 +356,18 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
                            ag_fields)
 
         grid_ag_alg_params = {
-            ValueGrabberAlgorithm.POINTS_INPUT: points_out,
+            QScoutValueGrabberAlgorithm.POINTS_INPUT: points_out,
             GridAggregatorAlgorithm.GRID_CELL_W_INPUT: grid_w,
             GridAggregatorAlgorithm.GRID_CELL_H_INPUT: grid_h,
             GridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT: ag_idx,
             GridAggregatorAlgorithm.FIELDS_TO_USE_INPUT: ag_fields,
-            GridAggregatorAlgorithm.GRID_OUTPUT: "memory:"
+            GridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT: "memory:"
         }
 
         grid_alg_out = processing.runAndLoadResults("QScout:gridaggregator", grid_ag_alg_params,
                                       context=context, feedback=feedback)
 
-        grid_out = grid_alg_out[GridAggregatorAlgorithm.GRID_OUTPUT]
+        grid_out = grid_alg_out[GridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT]
 
         return {self.DROP_AND_GRAB_POINTS_OUT: points_out, self.DROP_AND_GRAB_GRID_OUT: grid_out}
 

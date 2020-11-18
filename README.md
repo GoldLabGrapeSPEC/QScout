@@ -22,7 +22,7 @@ used to drop points on a field if no data is available.</p>
 <li><i>Point Interval</i> (Processing: <code>POINT_INTERVAL_INPUT</code>): The interval between points on a row. Functions similar to row height.</li>
 <li><i>Match Threshold</i> (Processing: <code>OVERLAY_MATCH_THRESHOLD_INPUT</code>): A value from 0.000 to 1.000. The threshold at which to declare an overlay box a match and drop a pin. How this number is applied depends on which <i>Rating Function</i> has been selected. The default value is completely arbitrary and has absolutely no mathematical or scientific significance.</li>
 <li><i>Start Corner</i> (Processing: <code>START_CORNER_INPUT</code>): The corner of the field where the numbering starts. You would find row 1, plant 1 in this corner. For a better understanding of what "Top", "Bottom", "Left", and "Right" mean in this context, see the Usage Guide.</li>
-<li><i>Output Layer</i> (Processing: <code>OUTPUT</code>): The layer that the program will output geometry to. Leave blank to generate a new layer.</li>
+<li><i>Output Layer</i> (Processing: <code>DROPPED_PINS_OUTPUT</code>): The layer that the program will output geometry to. Leave blank to generate a new layer.</li>
 </ul>
 
 <h3>Advanced Parameters</h3>

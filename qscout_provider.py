@@ -31,11 +31,11 @@ __copyright__ = '(C) 2020 by Joshua Evans'
 __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
-from .pin_dropper_algorithm import PinDropperAlgorithm
-from .pin_locator_algorithm import PinLocatorAlgorithm
+from .pin_dropper_algorithm import QScoutPinDropperAlgorithm
+from .pin_locator_algorithm import QScoutPinLocatorAlgorithm
 from .grid_aggregator_algorithm import GridAggregatorAlgorithm
 from .drop_and_grab_algorithm import DropAndGrabAlgoithm
-from .value_grabber_algorithm import ValueGrabberAlgorithm
+from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 
 class QScoutProvider(QgsProcessingProvider):
 
@@ -56,10 +56,10 @@ class QScoutProvider(QgsProcessingProvider):
         """
         Loads all algorithms belonging to this provider.
         """
-        self.addAlgorithm(PinDropperAlgorithm())
-        self.addAlgorithm(PinLocatorAlgorithm())
+        self.addAlgorithm(QScoutPinDropperAlgorithm())
+        self.addAlgorithm(QScoutPinLocatorAlgorithm())
         self.addAlgorithm(GridAggregatorAlgorithm())
-        self.addAlgorithm(ValueGrabberAlgorithm())
+        self.addAlgorithm(QScoutValueGrabberAlgorithm())
         self.addAlgorithm(DropAndGrabAlgoithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())

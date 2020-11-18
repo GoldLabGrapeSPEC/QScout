@@ -18,7 +18,7 @@ from qgis.core import (QgsProcessingAlgorithm,
 import numpy as np
 
 from math import ceil, floor
-from .value_grabber_algorithm import ValueGrabberAlgorithm
+from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 
 class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
 
@@ -26,13 +26,12 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
     GRID_CELL_H_INPUT = 'GRID_CELL_H_INPUT'
     FIELDS_TO_USE_INPUT = 'FIELDS_TO_USE_INPUT'
     AGGREGATION_FUNCTION_INPUT = 'AGGREGATION_FUNCTION_INPUT'
-    GRID_OUTPUT = 'GRID_OUTPUT'
-
+    AGGREGATE_GRID_OUTPUT = 'GRID_OUTPUT'
 
     def initAlgorithm(self, config):
         self.addParameter(
             QgsProcessingParameterFeatureSource(
-                ValueGrabberAlgorithm.POINTS_INPUT,
+                QScoutValueGrabberAlgorithm.POINTS_INPUT,
                 self.tr("Points"),
                 [QgsProcessing.TypeVectorPoint]
             )
@@ -42,7 +41,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 self.GRID_CELL_W_INPUT,
                 self.tr("Grid Cell Width"),
-                parentParameterName=ValueGrabberAlgorithm.POINTS_INPUT,
+                parentParameterName=QScoutValueGrabberAlgorithm.POINTS_INPUT,
                 minValue=0
             )
         )
@@ -51,7 +50,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 self.GRID_CELL_H_INPUT,
                 self.tr("Grid Cell Height"),
-                parentParameterName=ValueGrabberAlgorithm.POINTS_INPUT,
+                parentParameterName=QScoutValueGrabberAlgorithm.POINTS_INPUT,
                 minValue=0
             )
         )
@@ -69,7 +68,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterField(
                 self.FIELDS_TO_USE_INPUT,
                 self.tr("Fields to Use"),
-                parentLayerParameterName=ValueGrabberAlgorithm.POINTS_INPUT,
+                parentLayerParameterName=QScoutValueGrabberAlgorithm.POINTS_INPUT,
                 allowMultiple=True,
                 optional=True
             )
@@ -77,13 +76,13 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.GRID_OUTPUT,
-                self.tr("Output Grid")
+                self.AGGREGATE_GRID_OUTPUT,
+                self.tr("Aggregate Grid")
             )
         )
 
     def processAlgorithm(self, parameters, context, feedback):
-        points_layer = self.parameterAsVectorLayer(parameters, ValueGrabberAlgorithm.POINTS_INPUT, context)
+        points_layer = self.parameterAsVectorLayer(parameters, QScoutValueGrabberAlgorithm.POINTS_INPUT, context)
         grid_w = self.parameterAsDouble(parameters, self.GRID_CELL_W_INPUT, context)
         grid_h = self.parameterAsDouble(parameters, self.GRID_CELL_H_INPUT, context)
         fields_to_use = self.parameterAsFields(parameters, self.FIELDS_TO_USE_INPUT, context)
@@ -123,7 +122,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
 
         (sink, dest_id) = self.parameterAsSink(
             parameters,
-            self.GRID_OUTPUT,
+            self.AGGREGATE_GRID_OUTPUT,
             context,
             fields=output_fields,
             geometryType=QgsWkbTypes.Polygon,
@@ -142,7 +141,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
             sink.addFeature(feature)
             count = count + 1
 
-        return {self.GRID_OUTPUT: dest_id}
+        return {self.AGGREGATE_GRID_OUTPUT: dest_id}
 
     def name(self):
         """

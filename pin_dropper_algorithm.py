@@ -49,7 +49,7 @@ ROW_REGEX = "[_\-\w]?[Rr]ow"  # TODO: improve regex
 VINE_REGEX = ".?([Vv]ine)|([Pp]lant)"
 
 
-class PinDropperAlgorithm(QScoutPinAlgorithm):
+class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
     creates a new identical one.
@@ -71,7 +71,7 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
     DATA_SOURCE_INPUT = 'FIELD_NAME_INPUT'
     DATA_SOURCE_FIELDS_TO_USE = 'DATA_SOURCE_FIELDS_TO_USE'
     PANEL_SIZE_INPUT = 'PANEL_SIZE_INPUT'
-    OUTPUT = 'OUTPUT'
+    DROPPED_PINS_OUTPUT = 'DROPPED_PINS_OUTPUT'
 
     def initAlgorithm(self, config):
         super().initAlgorithm(config)
@@ -115,8 +115,8 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.OUTPUT,
-                self.tr('Output layer')
+                self.DROPPED_PINS_OUTPUT,
+                self.tr('Dropped Pins')
             )
         )
 
@@ -143,7 +143,7 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         # dictionary returned by the processAlgorithm function.
         (self.sink, dest_id) = self.parameterAsSink(
             parameters,
-            self.OUTPUT,
+            self.DROPPED_PINS_OUTPUT,
             context,
             fields=out_fields,
             geometryType=QgsWkbTypes.Point,
@@ -193,7 +193,7 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         # statistics, etc. These should all be included in the returned
         # dictionary, with keys matching the feature corresponding parameter
         # or output names.
-        return {self.OUTPUT: dest_id}
+        return {self.DROPPED_PINS_OUTPUT: dest_id}
 
     def load_input_data(self, parameters, context):
         """
@@ -340,4 +340,4 @@ class PinDropperAlgorithm(QScoutPinAlgorithm):
         return self.tr("Drop Pins")
 
     def createInstance(self):
-        return PinDropperAlgorithm()
+        return QScoutPinDropperAlgorithm()

@@ -13,10 +13,10 @@ from qgis.core import (QgsProcessingParameterFeatureSource, QgsFields, QgsField,
 from .qscout_pin_algorithm import QScoutPinAlgorithm
 
 
-class PinLocatorAlgorithm(QScoutPinAlgorithm):
+class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
 
     POINTS_INPUT = 'POINTS_INPUT'
-    POINTS_OUTPUT = 'POINTS_OUTPUT'
+    INDEXED_POINTS_OUTPUT = 'POINTS_OUTPUT'
 
     COL_FIELD_NAME = 'plant'
     ROW_FIELD_NAME = 'row'
@@ -36,8 +36,8 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.POINTS_OUTPUT,
-                self.tr("Indexes Points")
+                self.INDEXED_POINTS_OUTPUT,
+                self.tr("Indexed Points")
             )
         )
 
@@ -73,7 +73,7 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
 
         (sink, dest_id) = self.parameterAsSink(
             parameters,
-            self.POINTS_OUTPUT,
+            self.INDEXED_POINTS_OUTPUT,
             context,
             fields=new_fields,
             geometryType=QgsWkbTypes.Point,
@@ -108,7 +108,7 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
             if count % int(num_feature / 10) == 0:
                 feedback.setProgressText("Located %d of %d" % (count, num_feature))
 
-        return {self.POINTS_OUTPUT: dest_id}  # no output
+        return {self.INDEXED_POINTS_OUTPUT: dest_id}  # no output
 
     def reverseLocatePoint(self, point):
 
@@ -163,4 +163,4 @@ class PinLocatorAlgorithm(QScoutPinAlgorithm):
         return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return PinLocatorAlgorithm()
+        return QScoutPinLocatorAlgorithm()
