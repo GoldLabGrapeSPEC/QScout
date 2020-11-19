@@ -113,7 +113,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
         output_fields.extend(points_layer.fields())
 
         for i in range(self.raster_data.shape[2]):
-            output_fields.append(QgsField(band_field(i), QVariant.Int if self._grab_radius == 0 else QVariant.Double))
+            output_fields.append(QgsField(band_field(i), QVariant.Double))
 
         (sink, dest_id) = self.parameterAsSink(
             parameters,
