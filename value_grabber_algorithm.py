@@ -125,20 +125,24 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
 
         count = 0
-        try:
-            for in_feat in points_layer.getFeatures():
-                feature = QgsFeature(output_fields, count)
-                for field in in_feat.fields().names():
-                    feature.setAttribute(field, in_feat[field])
+        for in_feat in points_layer.getFeatures():
+            if in_feat.hasGeometry():
                 band_vals = self.query_raster(in_feat)
-                for band in range(self.raster_data.shape[2]):
-                    feature.setAttribute(band_field(band), float(band_vals[band]))
-                feature.setGeometry(in_feat.geometry())
-                sink.addFeature(feature)
-                count = count + 1
-        except IndexError:
-            feedback.pushInfo("Vector and Image don't overlap.")
-            feedback.pushInfo(traceback.print_exc())
+                if band_vals is not None:
+                    feature = QgsFeature(output_fields, count)
+                    for field in in_feat.fields().names():
+                        feature.setAttribute(field, in_feat[field])
+
+                    for band in range(self.raster_data.shape[2]):
+                        feature.setAttribute(band_field(band), float(band_vals[band]))
+                    feature.setGeometry(in_feat.geometry())
+                    sink.addFeature(feature)
+                    count = count + 1
+                else:
+                    feedback.pushInfo("Could not grab raster data for x:%s, y:%s" % (
+                        (in_feat.geometry().asPoint().x(), in_feat.geometry().asPoint().y())))
+            else:
+                feedback.pushInfo("Feature %s has no geometry" % in_feat.id())
 
         return {self.POINTS_WITH_VALUES_OUTPUT: dest_id}
 
@@ -219,30 +223,34 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
         return xs, ys, distances
 
     def query_raster(self, point_feature, bands=np.s_[:]):
-        point = point_feature.geometry().asPoint()
-        raster_x, raster_y = self.as_raster_coords(point.x(), point.y(), self.raster_crs_transform)
-        if self._grab_radius == 0:
-            return self.data(raster_x, raster_y, bands)
+        try:
+            point = point_feature.geometry().asPoint()
+            raster_x, raster_y = self.as_raster_coords(point.x(), point.y(), self.raster_crs_transform)
+            if self._grab_radius == 0:
+                return self.data(raster_x, raster_y, bands)
 
-        rpixel = self.get_pixel_radius_around(point)
-        xs, ys, distances = self.mesh_with_distances(rpixel, raster_x, raster_y)
-        pixels = self.data(xs, ys, bands)
+            rpixel = self.get_pixel_radius_around(point)
+            xs, ys, distances = self.mesh_with_distances(rpixel, raster_x, raster_y)
+            pixels = self.data(xs, ys, bands)
 
-        if self.grab_analysis_function is None:
-            if self.grab_distance_weight() != 0:
-                nanvals = np.any(np.isnan(pixels), axis=1)
-                weights = 1 / ((distances ** 2) * self.grab_distance_weight())
-                weights[distances == 0] = 1 # will appear as np.inf on the above line
-                print(weights)
-                return_data = np.average(pixels[~nanvals, :].astype(np.float_), axis=0, weights=weights[~nanvals])
+            if self.grab_analysis_function is None:
+                if self.grab_distance_weight() != 0:
+                    nanvals = np.any(np.isnan(pixels), axis=1)
+                    weights = 1 / ((distances ** 2) * self.grab_distance_weight())
+                    weights[distances == 0] = 1 # will appear as np.inf on the above line
+                    print(weights)
+                    return_data = np.average(pixels[~nanvals, :].astype(np.float_), axis=0, weights=weights[~nanvals])
+                else:
+                    return_data = np.nanmean(pixels, axis=0)
             else:
-                return_data = np.nanmean(pixels, axis=0)
-        else:
-            center_geo_rasterunits = self.raster_crs_transform.transform(point)
-            return_data = self.grab_analysis_function(coords=[xs, ys], distances=distances, bands=bands, pixels=pixels,
-                                                      center_geo=[center_geo_rasterunits.x(), center_geo_rasterunits.y()],
-                                                      center_raster=[raster_x, raster_y], feature=point_feature, context=self)
-        return return_data
+                center_geo_rasterunits = self.raster_crs_transform.transform(point)
+                return_data = self.grab_analysis_function(coords=[xs, ys], distances=distances, bands=bands, pixels=pixels,
+                                                          center_geo=[center_geo_rasterunits.x(), center_geo_rasterunits.y()],
+                                                          center_raster=[raster_x, raster_y], feature=point_feature, context=self)
+            return return_data
+        except IndexError as e:
+            print(e)
+            return None
 
 def band_field(i):
     return "Band_" + str(i+1)
