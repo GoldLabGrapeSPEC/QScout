@@ -1,4 +1,4 @@
-import os
+from os import sep
 from importlib.util import spec_from_file_location, module_from_spec
 import numpy as np
 from PyQt5.QtCore import QCoreApplication, QVariant
@@ -92,7 +92,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
 
         grab_func_file = self.parameterAsFile(parameters, self.GRAB_FUNCTION_INPUT, context)
         if grab_func_file.strip():
-            spec = spec_from_file_location(grab_func_file[grab_func_file.find(os.sep):grab_func_file.find(".")],
+            spec = spec_from_file_location(grab_func_file[grab_func_file.find(sep):grab_func_file.find(".")],
                                            grab_func_file)
             module = module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -123,15 +123,6 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             geometryType=QgsWkbTypes.Point,
             crs=points_layer.crs(),
             sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
-        #
-        # try:
-        #     for bandIndex, band in enumerate(self.rasterio_image.read()):
-        #         output_fields.append(QgsField(band_field(i), QVariant.Int))
-        #         feedback.pushInfo("Working on band... %s" % bandIndex)
-        #         vector_data["Band_" + str(bandIndex)] = self.spec_puller_by_band(band, lons, lats)
-        # except IndexError:
-        #     feedback.pushInfo("Vector and Image don't overlap.")
-        #     feedback.pushInfo(traceback.print_exc())
 
         count = 0
         try:
@@ -139,10 +130,9 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
                 feature = QgsFeature(output_fields, count)
                 for field in in_feat.fields().names():
                     feature.setAttribute(field, in_feat[field])
-                band_vals = self.query_raster(in_feat.geometry().asPoint())
+                band_vals = self.query_raster(in_feat)
                 for band in range(self.raster_data.shape[2]):
-                    feature.setAttribute(band_field(band),
-                                         int(band_vals[band]) if self._grab_radius == 0 else float(round(band_vals[band], 3)))
+                    feature.setAttribute(band_field(band), float(band_vals[band]))
                 feature.setGeometry(in_feat.geometry())
                 sink.addFeature(feature)
                 count = count + 1
@@ -228,7 +218,8 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             distances = distances[allowed]
         return xs, ys, distances
 
-    def query_raster(self, point, bands=np.s_[:]):
+    def query_raster(self, point_feature, bands=np.s_[:]):
+        point = point_feature.geometry().asPoint()
         raster_x, raster_y = self.as_raster_coords(point.x(), point.y(), self.raster_crs_transform)
         if self._grab_radius == 0:
             return self.data(raster_x, raster_y, bands)
@@ -250,7 +241,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             center_geo_rasterunits = self.raster_crs_transform.transform(point)
             return_data = self.grab_analysis_function(coords=[xs, ys], distances=distances, bands=bands, pixels=pixels,
                                                       center_geo=[center_geo_rasterunits.x(), center_geo_rasterunits.y()],
-                                                      center_raster=[raster_x, raster_y], context=self)
+                                                      center_raster=[raster_x, raster_y], feature=point_feature, context=self)
         return return_data
 
 def band_field(i):
