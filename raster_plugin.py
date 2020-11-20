@@ -33,6 +33,8 @@ class QScoutRasterPlugin:
         self.raster_crs = QgsCoordinateReferenceSystem(ds.GetProjection())
         # save raster transform
         self.raster_transform = ds.GetGeoTransform()
+        self.rot = np.array(self.raster_transform)[np.array([1, 2, 4, 5])].reshape(2, 2)
+        self.trans = np.array(self.raster_transform)[np.array([0, 3])].reshape(2, 1)
         del ds  # save memory
 
     def as_raster_coords(self, x_geo, y_geo, crs_transform=None):
@@ -43,17 +45,22 @@ class QScoutRasterPlugin:
                 point = crs_transform.transform(QgsPointXY(x_geo, y_geo))
                 x_geo = point.x()
                 y_geo = point.y()
-        x = (x_geo - self.raster_transform[0]) / self.raster_transform[1]
-        y = (y_geo - self.raster_transform[3]) / self.raster_transform[5]
-
-        if isinstance(x, np.ndarray):
-            return x.astype(np.int_), y.astype(np.int_)
+        if not isinstance(x_geo, np.ndarray):
+            x_geo = np.array([x_geo])
+            y_geo = np.array([y_geo])
+        coords = np.stack([x_geo, y_geo], axis=0)
+        x, y = np.matmul(np.linalg.inv(self.rot), (coords - self.trans))
+        if x.shape[0] == 1:
+            return int(round(x[0])), int(round(y[0]))  # "int(round(...)) is redundant but the program gets mad if I don't
         else:
-            return int(round(x)), int(round(y))  # "int(round(...)) is redundant but the program gets mad if I don't
+            return x.astype(np.int_), y.astype(np.int_)
 
     def as_geo(self, x_pixels, y_pixels):
-        x = self.raster_transform[0] + x_pixels * self.raster_transform[1] + y_pixels * self.raster_transform[2]
-        y = self.raster_transform[3] + x_pixels * self.raster_transform[4] + y_pixels * self.raster_transform[5]
+        if not isinstance(x_pixels, np.ndarray):
+            x_pixels = np.array([x_pixels])
+            y_pixels = np.array([y_pixels])
+        coords = np.stack([x_pixels, y_pixels], axis=0)
+        x, y = np.matmul(self.rot, coords) + self.trans
         return x, y
 
     def num_raster_bands(self):

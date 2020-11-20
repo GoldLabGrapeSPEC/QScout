@@ -100,9 +100,8 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
         else:
             self.grab_analysis_function = None
 
-        # vector_data = gpd.read_file(points_layer.dataProvider().dataSourceUri())
-
         self.load_raster_data(raster_file)
+
         assert round(abs(self.raster_transform[1]), 4) == round(abs(self.raster_transform[5]), 4), \
             "Raster should have square pixels"
 
