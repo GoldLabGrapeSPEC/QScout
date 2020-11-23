@@ -20,7 +20,7 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsGeometry)
 
 from .qscout_utils import *
-from .raster_plugin import QScoutRasterPlugin
+from .raster_plugin import QScoutRasterInterface
 
 from . import match_functions # import package, not specifics
 
@@ -39,7 +39,7 @@ START_CORNERS = [
 ]
 
 
-class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
+class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     def __init__(self, *args, **kwargs):
         super(QgsProcessingAlgorithm, self).__init__(*args, **kwargs)
         self._root = None
@@ -302,7 +302,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
 
         if self.rate_offset_match is not None:
             self.load_raster_data(self.raster.dataProvider().dataSourceUri())
-            self.raster_crs_transform = QgsCoordinateTransform(self.bound_box_layer.crs(), self.raster_crs,
+            self.raster_crs_transform = QgsCoordinateTransform(self.bound_box_layer.crs(), self.raster_crs(),
                                                                QgsProject.instance().transformContext())
 
         # convert row vector to the same CRS as the bounding box
@@ -875,8 +875,8 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             self._top_left_raster = [x1, y1]
             self._bottom_right_raster = [x2, y2]
 
-            if self._top_left_raster[0] >= context.raster_data.shape[0] \
-                    or self._top_left_raster[1] >= context.raster_data.shape[1] \
+            if self._top_left_raster[0] >= context.raster_width() \
+                    or self._top_left_raster[1] >= context.raster_height() \
                     or self._bottom_right_raster[0] < 0 \
                     or self._bottom_right_raster[1] < 0:
                 # entire sample is outside raster bounds. flag as garbage and move on
@@ -896,17 +896,19 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
                 self.offsets[DIRECTION_UP] = -self._top_left_raster[1]
                 self._top_left_raster[1] = 0
 
-            if self._bottom_right_raster[0] >= context.raster_data.shape[0]:
-                self.offsets[DIRECTION_RIGHT] = context.raster_data.shape[0] - self._bottom_right_raster[0] - 1
-                self._bottom_right_raster[0] = context.raster_data.shape[0] - 1
+            if self._bottom_right_raster[0] >= context.raster_width():
+                self.offsets[DIRECTION_RIGHT] = context.raster_width() - self._bottom_right_raster[0] - 1
+                self._bottom_right_raster[0] = context.raster_width() - 1
 
-            if self._bottom_right_raster[1] >= context.raster_data.shape[1]:
-                self.offsets[DIRECTION_DOWN] = context.raster_data.shape[1] - self._bottom_right_raster[1] - 1
-                self._bottom_right_raster[1] = context.raster_data.shape[1] - 1
+            if self._bottom_right_raster[1] >= context.raster_height():
+                self.offsets[DIRECTION_DOWN] = context.raster_height() - self._bottom_right_raster[1] - 1
+                self._bottom_right_raster[1] = context.raster_height() - 1
 
             # actually sample the raster
-            self.a = context.raster_data[self._top_left_raster[0]:self._bottom_right_raster[0],
-                     self._top_left_raster[1]:self._bottom_right_raster[1], :]
+            self.a = context.data(
+                np.s_[self._top_left_raster[0]:self._bottom_right_raster[0]],
+                np.s_[self._top_left_raster[1]:self._bottom_right_raster[1]]
+            )
 
             # depending on which match rating algorithm is used, these may or may not ever be needed
             # calculate them on an as-needed basis. results are stored in order to cut down on the number of
@@ -982,7 +984,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             method for debugging. saves the data, normalized data, and gradients from this sample as .tif files
             """
             driver = gdal.GetDriverByName("GTiff")
-            transform = list(context.raster_transform)
+            transform = list(context._raster_transform)
             transform[0] = self._top_left_geo[0]
             transform[3] = self._top_left_geo[1]
 

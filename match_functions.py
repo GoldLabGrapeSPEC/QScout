@@ -81,7 +81,7 @@ def rate_offset_match_global_normalized_difference(context, target, compare):
     if clip is None:
         return 0
     difference = np.abs(compare.data(c_m)[clip] - target.data(t_m)[clip])
-    norm_diff = np.stack([difference[:, :, n] / (context.band_ranges[n, 1] - context.band_ranges[n, 0])
+    norm_diff = np.stack([difference[:, :, n] / (context.band_max(n) - context.band_min(n))
                           for n
                           in range(difference.shape[2])], axis=-1)
     avg_difference = np.mean(norm_diff)

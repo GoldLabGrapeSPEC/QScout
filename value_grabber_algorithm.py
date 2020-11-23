@@ -20,12 +20,12 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsRectangle,
                        QgsPointXY)
 
-from .raster_plugin import QScoutRasterPlugin
+from .raster_plugin import QScoutRasterInterface
 
 import traceback
 
 
-class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
+class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     POINTS_INPUT = 'POINTS_INPUT'
     RASTER_INPUT = 'RASTER_INPUT'
     GRAB_RADIUS_INPUT = 'GRAB_RADIUS_INPUT'
@@ -102,16 +102,16 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
 
         self.load_raster_data(raster_file)
 
-        assert round(abs(self.raster_transform[1]), 4) == round(abs(self.raster_transform[5]), 4), \
+        assert round(abs(self._raster_transform[1]), 4) == round(abs(self._raster_transform[5]), 4), \
             "Raster should have square pixels"
 
-        self.raster_crs_transform = QgsCoordinateTransform(points_layer.crs(), self.raster_crs,
+        self.raster_crs_transform = QgsCoordinateTransform(points_layer.crs(), self.raster_crs(),
                                                            QgsProject.instance().transformContext())
 
         output_fields = QgsFields()
         output_fields.extend(points_layer.fields())
 
-        for i in range(self.raster_data.shape[2]):
+        for i in range(self.num_raster_bands()):
             output_fields.append(QgsField(band_field(i), QVariant.Double))
 
         (sink, dest_id) = self.parameterAsSink(
@@ -124,7 +124,9 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
 
         count = 0
+        # loop features
         for in_feat in points_layer.getFeatures():
+            # skip features with no geometry
             if in_feat.hasGeometry():
                 band_vals = self.query_raster(in_feat)
                 if band_vals is not None:
@@ -132,7 +134,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
                     for field in in_feat.fields().names():
                         feature.setAttribute(field, in_feat[field])
 
-                    for band in range(self.raster_data.shape[2]):
+                    for band in range(self.num_raster_bands()):
                         feature.setAttribute(band_field(band), float(band_vals[band]))
                     feature.setGeometry(in_feat.geometry())
                     sink.addFeature(feature)
@@ -203,7 +205,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
             QgsPointXY(x + self.grab_radius(), y + self.grab_radius())
         )
         scale_factor = self.raster_crs_transform.scaleFactor(ref_ext)
-        return int(abs(self._grab_radius * scale_factor * 2 / self.raster_transform[1]))
+        return int(abs(self._grab_radius * scale_factor * 2 / self._raster_transform[1]))
 
     def mesh_with_distances(self, r, cx=0, cy=0, filter_circle=True):
         xs, ys = np.meshgrid(np.arange(-r, r), np.arange(-r, r))
@@ -213,8 +215,8 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
         if filter_circle:
             allowed = np.all([
                 distances < r,
-                -1 < xs, xs < self.raster_data.shape[0],
-                -1 < ys, ys < self.raster_data.shape[1]
+                -1 < xs, xs < self.raster_width(),
+                -1 < ys, ys < self.raster_height()
             ], axis=0)
             xs = xs[allowed]
             ys = ys[allowed]
@@ -250,6 +252,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterPlugin):
         except IndexError as e:
             print(e)
             return None
+
 
 def band_field(i):
     return "Band_" + str(i+1)

@@ -13,6 +13,7 @@ def grab(coords,
          pixels,
          center_geo,
          center_raster,
+         point_feature,
          context):
     """
     Queries raster data from an instance of QScoutValueGrabberAlgorithm, and returns a set of values to be assigned
@@ -25,6 +26,8 @@ def grab(coords,
     @param pixels a one-dimensional numpy array of values of pixels at the points specified in coords
     @param center_geo the point at and/or around which the function will grab, in geographic coordinates
     @param center_raster the point at and/or around which the function will grab, in the crs units of the raster
+    @param point_feature the feature that shows the location being grabbed. useful if you want the grab function to
+    use attributes of the feature.
     @param context an instance of QScoutValueGrabberAlgorithm
     """
 
