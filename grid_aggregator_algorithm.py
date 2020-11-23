@@ -19,7 +19,11 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsGeometry,
                        QgsProcessingParameterField,
                        QgsProcessingParameterEnum,
-                       QgsPointXY)
+                       QgsPointXY,
+                       QgsProcessingParameterExtent,
+                       QgsCoordinateTransform,
+                       QgsCoordinateTransformContext,
+                       QgsProject)
 
 import numpy as np
 
@@ -39,6 +43,7 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
     FIELDS_TO_USE_INPUT = 'FIELDS_TO_USE_INPUT'
     AGGREGATION_FUNCTION_INPUT = 'AGGREGATION_FUNCTION_INPUT'
     CUSTOM_AGGREGATION_FUNCTION_INPUT = 'CUSTOM_AGGREGATION_FUNCTION_INPUT'
+    GRID_EXTENT_INPUT = 'GRID_EXTENT_INPUT'
     AGGREGATE_GRID_OUTPUT = 'GRID_OUTPUT'
 
     def initAlgorithm(self, config):
@@ -85,6 +90,14 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
+        param = QgsProcessingParameterExtent(
+            self.GRID_EXTENT_INPUT,
+            self.tr("Grid Extent"),
+            optional=True
+        )
+        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(param)
+
         self.addParameter(
             QgsProcessingParameterField(
                 self.FIELDS_TO_USE_INPUT,
@@ -110,6 +123,14 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
         grid_h = self.parameterAsDouble(parameters, self.GRID_CELL_H_INPUT, context)
         fields_to_use = self.parameterAsFields(parameters, self.FIELDS_TO_USE_INPUT, context)
         ag_idx = self.parameterAsEnum(parameters, self.AGGREGATION_FUNCTION_INPUT, context)
+        bounds = self.parameterAsExtent(parameters, self.GRID_EXTENT_INPUT, context)
+        if bounds.area() == 0:
+            bounds = points_layer.extent()
+        else:
+            bounds_crs = self.parameterAsExtentCrs(parameters, self.GRID_EXTENT_INPUT, context)
+            bounds_crs_convert = QgsCoordinateTransform(bounds_crs, points_layer.crs(),
+                                                        QgsProject.instance().transformContext())
+            bounds = bounds_crs_convert.transformBoundingBox(bounds)
         aggregation_class = AGGREGATION_FUNCTIONS[list(AGGREGATION_FUNCTIONS.keys())[ag_idx]]
         if aggregation_class is not None:
             aggregator = aggregation_class(self)
@@ -124,7 +145,6 @@ class GridAggregatorAlgorithm(QgsProcessingAlgorithm):
         assert grid_w > 0, "Grid width must be greater than zero."
         assert grid_h > 0, "Grid height must be greater than zero.s"
 
-        bounds = points_layer.extent()
         input_fields = []
         output_fields = QgsFields()
         for field in points_layer.fields():
