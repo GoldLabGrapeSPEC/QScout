@@ -73,7 +73,7 @@ Let me know if you have any more questions, which will then become 'frequently a
 fall within the borders. The grid will be oriented along the axes of the CRS of the points layer. (I think this always means N/S/E/W? Do some CRSs use other axes?)</p>
 
 <h2>Parameter Reference</h2>
-<h3>Basic Parameters<h3>
+<h3>Basic Parameters</h3>
 <ul>
 <il><i>Points</i> (Processing: <code>POINTS_INPUT</code>): The points to aggregate in the grid.</il>
 <li><i>Grid Cell Width</i> (Processing: <code>GRID_CELL_W_INPUT</code>): The width of the grid cells.</li>
