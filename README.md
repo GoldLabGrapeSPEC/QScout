@@ -1,12 +1,17 @@
-<h1>Pin Dropper</h1>
-<h2>Abstract</h2>
-<p>Pin Dropper is a QGIS plugin for georeferencing field data with a particular focus on vinyards. The plugin can also be
-used to drop points on a field if no data is available.</p>
+<p>The QScout suite is a collection of interacting QGIS Processing plugins for georeferencing and analyzing field 
+scouting data. In this documentation, parameter names are in <i>italics</i>, and code is in <code>monospaced typewriter font</code>.</p> 
 <p>The program can be cloned from this repository or downloaded from the QGIS plugin manager (eventually)</p>
 
+<h1>Drop Pins / Locate Pins in Field</h1>
+<h2>Abstract</h2>
+<p>Drop Pins (Processing: <code>qscout:droppins</code>) is a plugin for georeferencing field data with a particular focus on vinyards. The plugin can also be
+used to drop points on a field if no data is available.</p>
+<p>Locate Pins in Field (Processing: <code>qscout:locatepinsinfield</code>) effectively does the opposite of Drop Pins. Given a vector layer of points, the plugin will produce a copy of the layer with row and plant numbers added.</p>
+<p>These two algorithms largely use the same parameters so are grouped together.</p>
 <h2>Usage Guide</h2>
-<p>The minimum required to run the plugin is a <i>Bound Box</i>, a <i>Row Vector</i>, and values for </i>Row Spacing</i> and <i>Point Interval</i>. The bounding box is the bounderies of the area which the program will drop within. The <i>Row Vector</i> is a line drawn along a row. The program uses the <i>Row Vector</i> to understand the layout of the area. The program will assume all rows are parallel to the <i>Row Vector</i>. The length of the row vector does not matter, only the direction. If the row vector has more than two points, the plugin will ignore all but the first and last point.</p>
-<p>In order to assign data to dropped points, include an <i>Input Data</i> file. Currently, the only format supported is .csv. Excel, Google Docs, OpenOffice, and any other spreadsheet software will allow you to save files in the .csv format. The order of the columns in the file does not matter - the program will automatically search for columns with headers with names like 'Row' and 'Column' and use those to georeference the data. All other columns will be included as fields in the <i>Output Layer</i> unless you specify which fields to use with <i>Fields to Use</i> parameter. If your data describes the locations of plants in relation to the panel number in the row, use the <i>Panel Size</i> parameter to tell the plugin how many plants are in a panel.</p>
+<p>The minimum required to run the plugin is a <i>Bound Box</i>, a <i>Row Vector</i>, and values for <i>Row Spacing</i> and <i>Point Interval</i>. The bounding box is the bounderies of the area which the program will drop within. It does not have to be a rectangle but can be any polygon. The <i>Row Vector</i> is a line drawn along a row. The program uses the <i>Row Vector</i> to understand the layout of the area. The program will assume all rows are parallel to the <i>Row Vector</i>. The length of the row vector does not matter, only the direction. If the row vector has more than two points, the plugin will ignore all but the first and last point.</p>
+<p>In order to assign data to dropped points, Drop Pins requires an <i>Input Data</i> file. Currently, the only format supported is .csv. Excel, Google Docs, OpenOffice, and any other spreadsheet software will allow you to save files in the .csv format. The order of the columns in the file does not matter - the program will automatically search for columns with headers with names like 'Row' and 'Column' and use those to georeference the data. All other columns will be included as fields in the <i>Output Layer</i> unless you specify which fields to use with <i>Fields to Use</i> parameter. If your data describes the locations of plants in relation to the panel number in the row, use the <i>Panel Size</i> parameter to tell the plugin how many plants are in a panel. A data file is <b>not</b> required for Locate Pins in Field.</p>
+<p>Locate Pins in Field requires <i>Points to Index</i>, which is a vector layer</p>
 <p>The <i>Start Corner</i> parameter helps the program understand how row and plant numbers translate to points on a map. The corners of the field are determined from the <i>Row Vector</i>, which is assumed to point right to left. On a clock face, if the first point of the row vector is at the center of the clock, the last point of the row vector is at 3:00 (right), and top, bottom, and left are at 12:00, 6:00, and 9:00 respectively.</p>
 <p>The <i>Raster Layer</i>, <i>Match Threshold</i> and <i>Rate Offset Match Function</i> allow the program to drop points in a 'smarter' way. If <i>Rate Offset Match Function</i> is set to a value other than Regular, the program will attempt to find plants using the provided <i>Raster Layer</i>.</p>
 
@@ -16,21 +21,23 @@ used to drop points on a field if no data is available.</p>
 <li><i>Targeting Raster</i> (Processing: <code>TARGETING_RASTER_INPUT</code>): The input raster for the program. Not required if <i>Rate Offset Match Function</i> is set to 'Regular'. IMPORTANT: the input raster must have the same CRS as the <i>Bounding Box</i></li>
 <li><i>Bound Box</i> (Processing: <code>BOUND_BOX_INPUT</code>): A layer containing a polygon that the program will drop pins within.</li>
 <li><i>Row Vector</i> (Processing: <code>ROW_VECTOR_INPUT</code>): A direction vector, which the program takes in the form of a line, representing a row in the field. The first point in the line is the start point for the field, so this is also implicitly a position vector. Don't overthink this - just find a place where the raster is a clear pattern and draw a line along a row. If the CRS is different from BOUND_BOX_INPUT it will be automatically converted.</li>
-<li><i>Input Data</i> (Processing: <code>DATA_SOURCE_INPUT</code>): A csv file containing the data to georeference. If no file is provided, the program will drop a pin on everything it thinks is a plant. If a file is provided, the program will only drop pins on features described in the file.</li>
-<li><i>Drop Data-Less Points</i> (Processing: <code>DROP_DATALESS_POINTS_INPUT</code>): Whether the program will drop points on plants that don't have any information provided in <i>Input Data</i>. If <i>Input Data</i> is not provided, this will be treated as True.</li>
+<li><i>Input Data</i> (Processing: <code>DATA_SOURCE_INPUT</code>): A csv file containing the data to georeference. If no file is provided, the program will drop a pin on everything it thinks is a plant. If a file is provided, the program will only drop pins on features described in the file.<br>Only used by Drop Pins.</li>
+<li><i>Drop Data-Less Points</i> (Processing: <code>DROP_DATALESS_POINTS_INPUT</code>): Whether the program will drop points on plants that don't have any information provided in <i>Input Data</i>. If <i>Input Data</i> is not provided, this will be treated as True.<br>Only used by Drop Pins.</li>
 <li><i>Row Spacing</i> (Processing: <code>ROW_SPACING_INPUT</code>): The distance between two rows, in the units of the CRS used by <i>Bound Box</i>.</li>
 <li><i>Point Interval</i> (Processing: <code>POINT_INTERVAL_INPUT</code>): The interval between points on a row. Functions similar to row height.</li>
 <li><i>Match Threshold</i> (Processing: <code>OVERLAY_MATCH_THRESHOLD_INPUT</code>): A value from 0.000 to 1.000. The threshold at which to declare an overlay box a match and drop a pin. How this number is applied depends on which <i>Rating Function</i> has been selected. The default value is completely arbitrary and has absolutely no mathematical or scientific significance.</li>
 <li><i>Start Corner</i> (Processing: <code>START_CORNER_INPUT</code>): The corner of the field where the numbering starts. You would find row 1, plant 1 in this corner. For a better understanding of what "Top", "Bottom", "Left", and "Right" mean in this context, see the Usage Guide.</li>
-<li><i>Output Layer</i> (Processing: <code>DROPPED_PINS_OUTPUT</code>): The layer that the program will output geometry to. Leave blank to generate a new layer.</li>
+<li><i>Points to Index</i> (Processing: <code>POINTS_INPUT</code>): In Locate Pins in Field, the pins to assign row and plant number values to.<br>Only used by Locate Pins in Field.</li>
+<li><i>Dropped Pins</i> (Processing: <code>DROPPED_PINS_OUTPUT</code>): The layer or file where the program will output the dropped points. Leave blank to generate a new layer.<br>Only for Drop Pins.</li>
+<li><i>Indexed Points</i> (Processing: <code>INDEXED_POINTS_OUTPUT</code>): The layer or file where the program will output the points with field coordinates (row, plant). Only for Locate Pins in Field.</li>
 </ul>
 
 <h3>Advanced Parameters</h3>
 <ul>
 <li><i>Rate Offset Match Function</i> (Processing: <code>RATE_OFFSET_MATCH_FUNCTION_INPUT</code>: the function used to identify points as plants. See the Advanced Use Guide for more information.</li>
 <li><i>Compare from Root</i> (Processing: <code>COMPARE_FROM_ROOT_INPUT</code>): If set to True, the <i>Rate Offset Match Function></i> will use the root point (the one at the beginning of the <i>Row Vector</i> for comparisons rather than a neighboring point.</li>
-<li><i>Fields to Use</i> (Processing: <code>DATA_SOURCE_FIELDS_TO_USE</code>): A comma-seperated list of the columns in the csv provided in <i>Input Data</i> to express as fields in the features in the <i>Output Layer</i>. If left blank, all columns will be converted to <i>Output Layer</i> fields.</li>
-<li><i>Panel Size</i> (Processing: <code>PANEL_SIZE_INPUT</code>): The size of the panels in the field. Used for analysis of <i>Input Data</i>. For more information, see the Advanced Use Guide.</li>
+<li><i>Fields to Use</i> (Processing: <code>DATA_SOURCE_FIELDS_TO_USE</code>): A comma-seperated list of the columns in the csv provided in <i>Input Data</i> to express as fields in the features in the <i>Output Layer</i>. If left blank, all columns will be converted to <i>Output Layer</i> fields.<br>Only for Drop Pins.</li>
+<li><i>Panel Size</i> (Processing: <code>PANEL_SIZE_INPUT</code>): The size of the panels in the field. Used for analysis of <i>Input Data</i>. For more information, see the Advanced Use Guide.<br>Only for Drop Pins.</li>
 <li><i>Overlay Box Radius</i> (Processing: <code>OVERLAY_BOX_RADIUS_INPUT</code>): the radius of the box that the program will use for its comparisons, in field units (i.e. the height and interval values specified in the above section). Defaults to 2, which means 2 units AROUND the spot where the program is considering dropping a pin.</li>
 <li><i>Maximum Patch Size</i> (Processing: <code>PATCH_SIZE_INPUT</code>): The largest size of hole to fill when patching holes. I'm not explaining this very well. Set to 0 for no hole patching.</li>
 <li><i>Row Spacing Stdev</i> (Processing: <code>ROW_SPACING_STDEV_INPUT</code>): the standard deviation of the row height values. The program will assume a gaussian distribution and look within three standard deviations.</li>
@@ -60,3 +67,24 @@ Let me know if you have any more questions, which will then become 'frequently a
 
 <h2>Troubleshooting</h2>
 
+<h1>Grid Aggregator</h1>
+<h2>Abstract</h2>
+<p>This program takes a point layer and creates a polygon layer grid, then sets the values of the cells of the grid based on which points
+fall within the borders. The grid will be oriented along the axes of the CRS of the points layer. (I think this always means N/S/E/W? Do some CRSs use other axes?)</p>
+
+<h2>Parameter Reference</h2>
+<h3>Basic Parameters<h3>
+<ul>
+<il><i>Points</i> (Processing: <code>POINTS_INPUT</code>): The points to aggregate in the grid.</il>
+<li><i>Grid Cell Width</i> (Processing: <code>GRID_CELL_W_INPUT</code>): The width of the grid cells.</li>
+<li><i>Grid Cell Height</i> (Processing: <code>GRID_CELL_H_INPUT</code>): The height of the grid cells.</li>
+<li><i>Fields to Use</i> (Processing: <code>FIELDS_TO_USE_INPUT</code>): The fields to aggregate in the grid. Each field will be seperately aggregated.</li>
+<li><i>Aggregation Function</i> (Processing: <code>AGGREGATION_FUNCTION_INPUT</code>): The function to use to aggregate the values into the grid. Most of the options are likely self-explainatory but a detailed description can be found in the Advanced Use Guide.</li>
+<li><i>Aggregate Grid</i> (Processing: <code>AGGREGATE_GRID_OUTPUT</code>): The output file or layer where the grid will be created.</li>
+</ul>
+<h3>Advanced Parameters</h3>
+<ul>
+<li><i>Custom Aggregation Function</i> (Processing: <code>CUSTOM_AGGREGATION_FUNCTION_INPUT</code>): A file containing a custom aggregation function. Only for use by people experianced with Python. An example custom aggregation function script with more notes can be found in this repository, named <code>example_aggregate_function.py</code>.</li>
+<li><i>Grid Extent</i> (Processing: <code>GRID_EXTENT_INPUT</code>): Optional: the extent to draw the grid. An extent specified with an alternative CRS will be automatically converted. If left unspecified, grid extent will be automatically calculated from the extent of the <i>Points</i> parameter.</li>
+</ul>
+    
