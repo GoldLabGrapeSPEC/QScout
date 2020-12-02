@@ -51,13 +51,13 @@ used to drop points on a field if no data is available.</p>
 More advanced guide coming soon
 <h3>Rating Functions</h3>
 All these functions were developed by me. I'd be very interested to see what an actual expert would come up with.<Br>
-<i>Regular</i>: This is the default rating function. It ignores any provided <i>Raster Layer</i> and drops points at regular intervals. It's by far the fastest rating function because it doesn't actually do any rating.<br>
-<i>Local Normalized Difference</i>: Each pixel value for each raster band is "normalized" by dividing it by the range of values for that band within the <b>sample</b>. The average difference between normalized values in the two samples is compared to get the match value.<br>
-<i>Global Normalized Difference</i>: Each pixel value for each raster band is "normalized" by dividing it by the range of values for that band within the <b>entire raster</b>. The average difference between normalized values in the two samples is compared to get the match value.<br
-<i>Absolute Difference</i>: The average difference between the two samples is divided by 255.<br>
-<i>Relative Match Count</i>: Counts the number of pixels where the normalized values in the two samples are within 0.1 of each other. The count of relative matches is divided by the total number of pixels in the sample.<br>
-<i>Gradients</i>: The program calculates how much the pixel values are changing at each pixel, for each band. (Should the gradients be calculated based on normalized samples?) The average difference between the two gradient matrices is divided by 255. This is by far the most computaitonally intensive of the rating functions.<br>
-<i>Random</i>: Drops points randomly within the <i>Row Spacing Stdev</i> and <i>Point Interval Stdev</i>. I wrote this function during the development process to test if the other functions perform better than random chance, and have included it here on the off chance that someone may find an application for it.<br>
+<b>Regular</b>: This is the default rating function. It ignores any provided <i>Raster Layer</i> and drops points at regular intervals. It's by far the fastest rating function because it doesn't actually do any rating.<br>
+<b>Local Normalized Difference</b>: Each pixel value for each raster band is "normalized" by dividing it by the range of values for that band within the <b>sample</b>. The average difference between normalized values in the two samples is compared to get the match value.<br>
+<b>Global Normalized Difference</b>: Each pixel value for each raster band is "normalized" by dividing it by the range of values for that band within the <b>entire raster</b>. The average difference between normalized values in the two samples is compared to get the match value.<br
+<b>Absolute Difference</b>: The average difference between the two samples is divided by 255.<br>
+<b>Relative Match Count</b>: Counts the number of pixels where the normalized values in the two samples are within 0.1 of each other. The count of relative matches is divided by the total number of pixels in the sample.<br>
+<b>Gradients</b>: The program calculates how much the pixel values are changing at each pixel, for each band. (Should the gradients be calculated based on normalized samples?) The average difference between the two gradient matrices is divided by 255. This is by far the most computaitonally intensive of the rating functions.<br>
+<b>Random</b>: Drops points randomly within the <i>Row Spacing Stdev</i> and <i>Point Interval Stdev</i>. I wrote this function during the development process to test if the other functions perform better than random chance, and have included it here on the off chance that someone may find an application for it.<br>
 
 <h2>FAQ</h2>
 <b>Q:</b>"Why isn't my (1,1) point in the correct corner?"<br>
@@ -87,4 +87,47 @@ fall within the borders. The grid will be oriented along the axes of the CRS of 
 <li><i>Custom Aggregation Function</i> (Processing: <code>CUSTOM_AGGREGATION_FUNCTION_INPUT</code>): A file containing a custom aggregation function. Only for use by people experianced with Python. An example custom aggregation function script with more notes can be found in this repository, named <code>example_aggregate_function.py</code>.</li>
 <li><i>Grid Extent</i> (Processing: <code>GRID_EXTENT_INPUT</code>): Optional: the extent to draw the grid. An extent specified with an alternative CRS will be automatically converted. If left unspecified, grid extent will be automatically calculated from the extent of the <i>Points</i> parameter.</li>
 </ul>
-    
+
+<h2>Advanced Use Guide</h2>
+<h3>Aggregation Functions</h3>
+<p>The built-in aggregation functions are <b>Mean Average</b>, <b>Median Average</b>, <b>Sum</b>, <b>Standard Deviation</b>, and <b>Weighted Average</b>. Most of these are pretty self-explainatory. Weighted Average returns the average of the point values weighted by the distance between the point and the center of the grid cell. (I'm going to need to explain this better at some point)</p>
+<p>In addition to the built-in aggregation functions, python-savvy users can pass the plugin a custom aggregation function. This is explored in the next section.</p>
+
+<h3>Custom Aggregation Functions</h3>
+<p>If the user would like to aggregate pin values using a mathematical method not included in the prepackaged aggregation functions, they can specify their own custom aggregation function by passing a python file in the <i>Custom Aggregation Function</i> parameter.</p>
+<p>A custom aggregation function python file should contain a class named <code>Aggregator</code> which implements the following functions:</p>
+<ul>
+<li><code>__init__(self, context)</code> The processing plugin will pass itself to the constructor so that the aggregation function wrapper object can query attributes of the processing plugin.</li>
+<li><code>manual_field_ag(self)</code>, a function which returns a constant boolean value which is <code>False</code> if the aggregation function will return modified versions of the fields in the point layer passed to the plugin and <code>True</code> if the aggregation function will flatly return values for the fields specified in <code>self.return_vals()</code>. I'm not explaining this very well.</li>
+<li><code>return_vals(self)</code>, a function which takes no arguements and returns a list of length at least 1, containing 2-length tuples. Each tuple should contain the name of a field that this aggregation function will produce and the datatype, as a QVariant field type (<code>QVariant.Int</code>, <code>QVariant.Double</code>, or <code>QVariant.String</code>).</li>
+<li><code>aggregate(self, cell)</code>, the function that actually aggregates point values. This function accepts an instance of <code>GridGrabberCell</code> (for details on <code>GridGrabberCell</code>, see below) and, if <code>self.manual_field_ag()</code> is <code>False</code>, should return a list with length <code>len(self.return_vals()) * cell.attr_count())</code>. If <code>self.manual_field_ag()</code> is <code>True</code>, the list should be of the same length as <code>self.return_vals()</code> and ordered in the same way.</li>
+</ul>
+Tip: if you run the program and there are no errors but the Attribute Table in QGIS is empty, you probably passed something the wrong data type.
+
+<h1>Value Grabber</h1>
+<h2>Parameter Reference</h2>
+<h3>Basic Parameters</h3>
+<ul>
+<li><i>Points Input</i> (Processing: <code>POINTS_INPUT</code>): A vector layer of points. The layer will be duplicated and the duplicate will be returned with added fields for the bands of the raster.</li>
+<li><i>Raster File Input</i> (Processing: <code>RASTER_INPUT</code>): The raster file to grab band values from. In order to facilitate the use of large datasets which might crash QGIS, the file does NOT have to be a QGIS layer in the open project.</li>
+<li><i>Points with Grabbed Values</i> (Processing: <code>POINTS_WITH_VALUES_OUTPUT</code>): The points layer that will be returned. Can be a new layer or a file.</li>
+</ul>
+<h3>Advanced Parameters</h3>
+<ul>
+<li><i>Grab Radius</i> (Processing: <code>GRAB_RADIUS_INPUT</code>): Optional. If specified, the plugin will assign each point the average raster value within a radius. </li>
+<li><i>Grab Area Distance Weight</i> (Processing: <code>GRAB_AREA_DISTANCE_WEIGHT_INPUT</code>): Optional. If this is specified, the average taken within <i>Grab Radius</i> will be weighted by <code>1 / (distance from point^2 * <i>Grab Area Distance Weight</i>)</code>. The raster value directly below the point will be assigned a weight of <code>1</code>.</li>
+<li><i>Grab Function</i> (Processing: <code>GRAB_FUNCTION_INPUT</code>): Optional. If specified, a custom python script that will be used to grab values from the raster. Recommended for advanced users only. See <b>Advanced Use</b> below.</li>
+</ul>
+<h2>Advanced Use</h2>
+<h3>Custom Grab Functions</h3>
+<p>Similarly to in <b>Grid Aggregator</b>, the user can pass the algorithm a python script with a custom function to grab the values to assign to the features. Unlike <b>Grid Aggregator</b>, a custom script for <b>Value Grabber</b> contains only a single function without a class wrapper. The function should be have signature <code>def grab(coords, distances, bands, pixels, center_geo, center_raster, point_feature, context)</code>, where:</p>
+<ul>
+<li><code>coords</code> is a pair of lists of raster coords around <code>center_raster</code> and within <code>context.get_pixel_radius_around(center_geo)</code>. Can be unpacked with <code>xs, ys = coords</code>.</li>
+<li><code>distances</code> is a numpy array of the distance of each coord pair in <code>coords</code> from <code>center_raster</code>, in pixel units.</li>
+<li><code>bands</code> is the bands to return values for. It takes the form of a boolean array the length of which is the number of bands.</li>
+<li><code>pixels</code> is a one-dimensional numpy array of values of pixels at the points specified in <code>coords</code>.</li>
+<li><code>center_geo</code> is the point at and/or around which the function will grab, in geographic coordinates, as an x,y tuple.</li>
+<li><code>center_raster</code> the point at and/or around which the function will grab, in the crs units of the raster, as an x,y tuple.</li>
+<li><code>point_feature</code> the QgsFeature instance (point) that shows the location being grabbed. useful if you want the grab function to use attributes of the feature.</li>
+<li><code>context</code> is the instance of <code>QScoutValueGrabberAlgorithm</code> which is executing this algorithm.</li>
+</ul>
