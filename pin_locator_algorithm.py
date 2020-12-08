@@ -122,7 +122,7 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
                 best_distance = distance
                 best_coords = coords
 
-        return *best_coords, best_distance
+        return best_coords[0], best_coords[1], best_distance
 
 
     def name(self):
