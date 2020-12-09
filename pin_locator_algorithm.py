@@ -11,9 +11,10 @@ from PyQt5.QtCore import QCoreApplication, QVariant
 from qgis.core import (QgsProcessingParameterFeatureSource, QgsFields, QgsField, QgsProcessing, QgsProject, QgsCoordinateTransform,
                        QgsWkbTypes, QgsFeatureSink, QgsProcessingParameterFeatureSink, QgsFeature, QgsGeometry)
 from .qscout_pin_algorithm import QScoutPinAlgorithm
+from .qscout_feature_io_algorithm import QScoutFeatureIOAlgorithm
 
 
-class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
+class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
 
     POINTS_INPUT = 'POINTS_INPUT'
     INDEXED_POINTS_OUTPUT = 'POINTS_OUTPUT'
@@ -51,16 +52,16 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
         # this also includes orienting the coordinates according to the user's preferance
         self.relativize_coords()
 
-        points_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
+        self.pin_input_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
 
         # convert row vector to the same CRS as the bounding box
         need_correct_crs = False
-        if points_layer.crs().authid() != self.bound_box_layer.crs().authid():
+        if self.pin_input_layer.crs().authid() != self.bound_box_layer.crs().authid():
             need_correct_crs = True
-            coord_transformer = QgsCoordinateTransform(points_layer.crs(), self.bound_box_layer.crs(),
+            coord_transformer = QgsCoordinateTransform(self.pin_input_layer.crs(), self.bound_box_layer.crs(),
                                                        QgsProject.instance().transformContext())
 
-        points_data_provider = points_layer.dataProvider()
+        points_data_provider = self.pin_input_layer.dataProvider()
 
         new_fields = QgsFields(points_data_provider.fields())
 
@@ -71,14 +72,13 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
         assert new_fields.append(QgsField(name=self.OFFSET_FIELD_NAME, type=QVariant.Double)), \
             "Field name %s already in use." % self.OFFSET_FIELD_NAME
 
-        (sink, dest_id) = self.parameterAsSink(
+        dest_id = self.create_sink(
             parameters,
             self.INDEXED_POINTS_OUTPUT,
             context,
-            fields=new_fields,
-            geometryType=QgsWkbTypes.Point,
-            crs=self.bound_box_layer.crs(),
-            sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
+            new_fields,
+            QgsWkbTypes.Point,
+            self.bound_box_layer.crs())
 
         x_field = new_fields.indexOf(self.COL_FIELD_NAME)
         y_field = new_fields.indexOf(self.ROW_FIELD_NAME)
@@ -89,8 +89,7 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
 
         feedback.setProgress(0)
 
-        for src_feature in points_layer.getFeatures():
-            count = count + 1
+        for src_feature in self.feature_input():
             point = src_feature.geometry().asPoint()
             if need_correct_crs:
                 point = coord_transformer.transform(point)
@@ -103,7 +102,7 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
             feature.setAttribute(y_field, int(y))
             feature.setAttribute(offset_field, float(distance))
             feature.setGeometry(QgsGeometry.fromPointXY(point))
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+            count = self.append_to_feature_output(feature, count)
             feedback.setProgress(100 * count / num_feature)
             if count % int(num_feature / 10) == 0:
                 feedback.setProgressText("Located %d of %d" % (count, num_feature))
@@ -164,3 +163,6 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm):
 
     def createInstance(self):
         return QScoutPinLocatorAlgorithm()
+
+    def feature_input(self):
+        return self.pin_input_layer.getFeatures()

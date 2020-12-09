@@ -42,6 +42,7 @@ from qgis.core import (
                        )
 
 from .qscout_pin_algorithm import *
+from .qscout_feature_io_algorithm import QScoutFeatureIOAlgorithm
 
 PANEL_REGEX = ".?[Pp]anel.?"
 COL_REGEX = "([_\-\w]?[Cc]ol.?)|([Nn]umber.?)"  # TODO: improve regex
@@ -49,7 +50,7 @@ ROW_REGEX = "[_\-\w]?[Rr]ow"  # TODO: improve regex
 VINE_REGEX = ".?([Vv]ine)|([Pp]lant)"
 
 
-class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
+class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
     """
     This is an example algorithm that takes a vector layer and
     creates a new identical one.
@@ -141,22 +142,38 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
         # dictionary returned by the processAlgorithm function.
-        (self.sink, dest_id) = self.parameterAsSink(
+        dest_id = self.create_sink(
             parameters,
             self.DROPPED_PINS_OUTPUT,
             context,
-            fields=out_fields,
-            geometryType=QgsWkbTypes.Point,
-            crs=self.bound_box_layer.crs(),
-            sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
+            out_fields,
+            QgsWkbTypes.Point,
+            self.bound_box_layer.crs(),
+        )
 
         # read values from source csv file
         # (for now generate random values from 1 to 5)
 
         # set output field values
-        count = 0
         already_dropped = []
         not_dropped = []
+        self.add_pins_to_output(data, attrs, not_dropped)
+
+        for d in not_dropped:  # output non-dropped data in input data
+            feedback.pushInfo("Did not drop coordinates for %d, %d." % d)
+
+        # Return the results of the algorithm. In this case our only result is
+        # the feature sink which contains the processed features, but some
+        # algorithms may return multiple feature sinks, calculated numeric
+        # statistics, etc. These should all be included in the returned
+        # dictionary, with keys matching the feature corresponding parameter
+        # or output names.
+        return {self.DROPPED_PINS_OUTPUT: dest_id}
+
+    def add_pins_to_output(self, data, attrs, not_dropped):
+        # set output field values
+        count = 0
+        already_dropped = []
         # first loop. add points from input data
         if data is not None:
             for entry in data:
@@ -183,17 +200,6 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
                     entry[self.col_attr_idx] = int(coords[0])
                     entry[self.row_attr_idx] = int(coords[1])
                     count = self.add_pin_to_output(self[coords], entry, count)
-
-        for d in not_dropped:  # output non-dropped data in input data
-            feedback.pushInfo("Did not drop coordinates for %d, %d." % d)
-
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.DROPPED_PINS_OUTPUT: dest_id}
 
     def load_input_data(self, parameters, context):
         """
@@ -323,8 +329,7 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
         feat = QgsFeature(id=count)
         feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
         feat.setAttributes(data)
-        self.sink.addFeature(feat)
-        return count + 1
+        return self.append_to_feature_output(feat, count)
 
     def name(self):
         """
@@ -341,3 +346,6 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm):
 
     def createInstance(self):
         return QScoutPinDropperAlgorithm()
+
+    def feature_input(self):
+        pass

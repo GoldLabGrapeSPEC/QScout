@@ -33,7 +33,7 @@ __revision__ = '$Format:%H$'
 from qgis.core import QgsProcessingProvider
 from .pin_dropper_algorithm import QScoutPinDropperAlgorithm
 from .pin_locator_algorithm import QScoutPinLocatorAlgorithm
-from .grid_aggregator_algorithm import GridAggregatorAlgorithm
+from .grid_aggregator_algorithm import QScoutGridAggregatorAlgorithm
 from .drop_and_grab_algorithm import DropAndGrabAlgoithm
 from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 
@@ -58,7 +58,7 @@ class QScoutProvider(QgsProcessingProvider):
         """
         self.addAlgorithm(QScoutPinDropperAlgorithm())
         self.addAlgorithm(QScoutPinLocatorAlgorithm())
-        self.addAlgorithm(GridAggregatorAlgorithm())
+        self.addAlgorithm(QScoutGridAggregatorAlgorithm())
         self.addAlgorithm(QScoutValueGrabberAlgorithm())
         self.addAlgorithm(DropAndGrabAlgoithm())
         # add additional algorithms here

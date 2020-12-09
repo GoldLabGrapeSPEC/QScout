@@ -21,11 +21,10 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsPointXY)
 
 from .raster_plugin import QScoutRasterInterface
+from .qscout_feature_io_algorithm import QScoutFeatureIOAlgorithm
 
-import traceback
 
-
-class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
+class QScoutValueGrabberAlgorithm(QScoutFeatureIOAlgorithm, QScoutRasterInterface):
     POINTS_INPUT = 'POINTS_INPUT'
     RASTER_INPUT = 'RASTER_INPUT'
     GRAB_RADIUS_INPUT = 'GRAB_RADIUS_INPUT'
@@ -68,7 +67,6 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface)
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
-
         param = QgsProcessingParameterFile(
             self.GRAB_FUNCTION_INPUT,
             self.tr("Grab Function"),
@@ -85,7 +83,7 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface)
         )
 
     def processAlgorithm(self, parameters, context, feedback):
-        points_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
+        self.points_input_layer = self.parameterAsVectorLayer(parameters, self.POINTS_INPUT, context)
         raster_file = self.parameterAsFile(parameters, self.RASTER_INPUT, context)
         self._grab_radius = self.parameterAsDouble(parameters, self.GRAB_RADIUS_INPUT, context)
         self._grab_distance_weight = self.parameterAsDouble(parameters, self.GRAB_AREA_DISTANCE_WEIGHT_INPUT, context)
@@ -99,53 +97,58 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface)
             self.grab_analysis_function = module.grab
         else:
             self.grab_analysis_function = None
-
         self.load_raster_data(raster_file)
+        return self.grab_values(parameters, context, feedback)
+
+    def grab_values(self, parameters, context, feedback):
 
         assert round(abs(self._raster_transform[1]), 4) == round(abs(self._raster_transform[5]), 4), \
             "Raster should have square pixels"
 
-        self.raster_crs_transform = QgsCoordinateTransform(points_layer.crs(), self.raster_crs(),
+        self.raster_crs_transform = QgsCoordinateTransform(self.points_input_layer.crs(), self.raster_crs(),
                                                            QgsProject.instance().transformContext())
 
         output_fields = QgsFields()
-        output_fields.extend(points_layer.fields())
+        output_fields.extend(self.points_input_layer.fields())
 
         for i in range(self.num_raster_bands()):
             output_fields.append(QgsField(band_field(i), QVariant.Double))
 
-        (sink, dest_id) = self.parameterAsSink(
+        dest_id = self.create_sink(
             parameters,
             self.POINTS_WITH_VALUES_OUTPUT,
             context,
-            fields=output_fields,
-            geometryType=QgsWkbTypes.Point,
-            crs=points_layer.crs(),
-            sinkFlags=QgsFeatureSink.RegeneratePrimaryKey)
+            output_fields,
+            QgsWkbTypes.Point,
+            self.points_input_layer.crs(),
+        )
 
         count = 0
         # loop features
-        for in_feat in points_layer.getFeatures():
-            # skip features with no geometry
-            if in_feat.hasGeometry():
-                band_vals = self.query_raster(in_feat)
-                if band_vals is not None:
-                    feature = QgsFeature(output_fields, count)
-                    for field in in_feat.fields().names():
-                        feature.setAttribute(field, in_feat[field])
-
-                    for band in range(self.num_raster_bands()):
-                        feature.setAttribute(band_field(band), float(band_vals[band]))
-                    feature.setGeometry(in_feat.geometry())
-                    sink.addFeature(feature)
-                    count = count + 1
-                else:
-                    feedback.pushInfo("Could not grab raster data for x:%s, y:%s" % (
-                        (in_feat.geometry().asPoint().x(), in_feat.geometry().asPoint().y())))
-            else:
-                feedback.pushInfo("Feature %s has no geometry" % in_feat.id())
+        for in_feat in self.feature_input():
+            count = self.process_pin(in_feat, output_fields, count, feedback)
 
         return {self.POINTS_WITH_VALUES_OUTPUT: dest_id}
+
+    def process_pin(self, in_feat, output_fields, count, feedback):
+        # skip features with no geometry
+        if in_feat.hasGeometry():
+            band_vals = self.query_raster(in_feat)
+            if band_vals is not None:
+                feature = QgsFeature(output_fields, count)
+                for field in in_feat.fields().names():
+                    feature.setAttribute(field, in_feat[field])
+
+                for band in range(self.num_raster_bands()):
+                    feature.setAttribute(band_field(band), float(band_vals[band]))
+                feature.setGeometry(in_feat.geometry())
+                count = self.append_to_feature_output(feature, count)
+            else:
+                feedback.pushInfo("Could not grab raster data for x:%s, y:%s" % (
+                    (in_feat.geometry().asPoint().x(), in_feat.geometry().asPoint().y())))
+        else:
+            feedback.pushInfo("Feature %s has no geometry" % in_feat.id())
+        return count
 
     def name(self):
         """
@@ -238,21 +241,22 @@ class QScoutValueGrabberAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface)
                 if self.grab_distance_weight() != 0:
                     nanvals = np.any(np.isnan(pixels), axis=1)
                     weights = 1 / ((distances ** 2) * self.grab_distance_weight())
-                    weights[distances == 0] = 1 # will appear as np.inf on the above line
-                    print(weights)
+                    weights[distances == 0] = 1  # will appear as np.inf on the above line
                     return_data = np.average(pixels[~nanvals, :].astype(np.float_), axis=0, weights=weights[~nanvals])
                 else:
                     return_data = np.nanmean(pixels, axis=0)
             else:
                 center_geo_rasterunits = self.raster_crs_transform.transform(point)
-                return_data = self.grab_analysis_function(coords=[xs, ys], distances=distances, bands=bands, pixels=pixels,
-                                                          center_geo=[center_geo_rasterunits.x(), center_geo_rasterunits.y()],
-                                                          center_raster=[raster_x, raster_y], feature=point_feature, context=self)
+                return_data = self.grab_analysis_function(coords=(xs, ys), distances=distances, bands=bands, pixels=pixels,
+                                                          center_geo=(center_geo_rasterunits.x(), center_geo_rasterunits.y()),
+                                                          center_raster=(raster_x, raster_y), feature=point_feature, context=self)
             return return_data
         except IndexError as e:
             print(e)
             return None
 
+    def feature_input(self):
+        return self.points_input_layer.getFeatures()
 
 def band_field(i):
     return "Band_" + str(i+1)

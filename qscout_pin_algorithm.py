@@ -17,7 +17,8 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsProcessingParameterRasterLayer,
                        QgsProcessingParameterBoolean,
                        QgsPointXY,
-                       QgsGeometry)
+                       QgsGeometry,
+                       QgsWkbTypes)
 
 from .qscout_utils import *
 from .raster_plugin import QScoutRasterInterface
@@ -314,7 +315,10 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             row_vector_geom.transform(coord_transformer)
 
         # process row vector
-        row_vector = row_vector_geom.asMultiPolyline()[0]
+        if row_vector_geom.isMultipart():
+            row_vector = row_vector_geom.asMultiPolyline()[0]
+        else:
+            row_vector = row_vector_geom.asPolyline()
         start = row_vector[0]
         stop = row_vector[len(row_vector) - 1]
 
