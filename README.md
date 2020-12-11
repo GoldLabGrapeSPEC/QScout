@@ -60,12 +60,17 @@ All these functions were developed by me. I'd be very interested to see what an 
 <b>Random</b>: Drops points randomly within the <i>Row Spacing Stdev</i> and <i>Point Interval Stdev</i>. I wrote this function during the development process to test if the other functions perform better than random chance, and have included it here on the off chance that someone may find an application for it.<br>
 
 <h2>FAQ</h2>
-<b>Q:</b>"Why isn't my (1,1) point in the correct corner?"<br>
-<b>A:</b>You may have drawn the row vector in the opposite direction from what you meant. The row vector points left to right towards what would be 3:00 on a clock face. To fix this problem, you can either redraw the row vector or imagine that the entire map is rotated by 180 degrees. <br>
-<br>
-Let me know if you have any more questions, which will then become 'frequently asked'
 
 <h2>Troubleshooting</h2>
+<b>Problem:</b> "My (1,1) point isn't in the correct corner."<br>
+<b>Solution:</b> You may have drawn the row vector in the opposite direction from what you meant. The row vector points left to right towards what would be 3:00 on a clock face. To fix this problem, you can either redraw the row vector or imagine that the entire map is rotated by 180 degrees. <br>
+<br>
+<b>Problem:</b> "Error message reading 'ValueError: some errors were detected!' followed by a series of messages reading something akin to 'Line #<i>x</i> (got <i>y</i> columns instead of <i>z</i>)'."
+<b>Solution:</b> The first step is to check that your lines all have the same number of values. The <code>.csv</code> file can be opened in a text editor. Every row should have the same number of values, seperated by commas. If that doesn't work, check if your column headers have any special characters, such as "$", "#", "%", and remove those characters if you find them. If that doesn't solve the problem, email me. 
+<br>
+
+Let me know if you have any more questions, which will then become 'frequently asked'
+
 
 <h1>Grid Aggregator</h1>
 <h2>Abstract</h2>
