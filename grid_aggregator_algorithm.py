@@ -152,10 +152,10 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
         assert grid_h > 0, "Grid height must be greater than zero.s"
 
         input_fields = []
-        output_fields = QgsFields()
+        self.output_fields = QgsFields()
         if aggregator.manual_field_ag():
             for field_name, field_dtype in aggregator.return_vals():
-                output_fields.add(field_name, field_dtype)
+                self.feature_output_fields().add(field_name, field_dtype)
             input_fields = [f.name() for f in self.points_input_layer.fields()]
         for field in self.points_input_layer.fields():
             if field.name() in fields_to_use:
@@ -164,12 +164,12 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                 # allow aggregators for non-numeric data types if using a custom aggregation class
                 for return_val_name, return_val_dtype in aggregator.return_vals():
                     return_val_dtype = field.type() if return_val_dtype is None else return_val_dtype
-                    output_fields.append(QgsField(return_val_name + field.name(), return_val_dtype))
+                    self.feature_output_fields().append(QgsField(return_val_name + field.name(), return_val_dtype))
                 input_fields.append(field.name())
 
-        assert len(input_fields) == output_fields.size()
+        assert len(input_fields) == self.output_fields.size()
 
-        grid_cells = self.setup_grid(bounds, grid_w, grid_h, output_fields)
+        grid_cells = self.setup_grid(bounds, grid_w, grid_h)
 
         xstart = floor(bounds.xMinimum())
         ystart = floor(bounds.yMinimum())
@@ -190,9 +190,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
             parameters,
             self.AGGREGATE_GRID_OUTPUT,
             context,
-            output_fields,
-                QgsWkbTypes.Polygon,
-            self.points_input_layer.crs(),
+            QgsWkbTypes.Polygon
         )
 
         count = 0
@@ -201,13 +199,13 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
             feature = QgsFeature(count)
             feature.setGeometry(QgsGeometry.fromRect(cell.rect))
             cell_values = aggregator.aggregate(cell)
-            assert len(cell_values) == output_fields.size()
+            assert len(cell_values) == self.feature_output_fields().size()
             feature.setAttributes(cell_values)
             count = self.append_to_feature_output(feature, count)
 
         return {self.AGGREGATE_GRID_OUTPUT: dest_id}
 
-    def setup_grid(self, bounds, grid_w, grid_h, output_fields):
+    def setup_grid(self, bounds, grid_w, grid_h):
         grid_cells = {}
 
         xstart = floor(bounds.xMinimum())
@@ -220,7 +218,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                     ystart + (y * grid_h),
                     xstart + ((x + 1) * grid_w),
                     ystart + ((y + 1) * grid_h),
-                    output_fields.size()
+                    self.feature_output_fields().size()
                 )
         return grid_cells
 
@@ -269,6 +267,12 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
         should return an iterable, generally either a QgsFeatureIterator or list
         """
         return self.points_input_layer.getFeatures()
+
+    def feature_input_crs(self):
+        return self.points_input_layer.crs()
+
+    def feature_output_fields(self):
+        return self.output_fields
 
     class GridGrabberCell:
         def __init__(self, xmin, ymin, xmax, ymax, attr_count):

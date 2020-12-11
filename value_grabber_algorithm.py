@@ -105,37 +105,35 @@ class QScoutValueGrabberAlgorithm(QScoutFeatureIOAlgorithm, QScoutRasterInterfac
         assert round(abs(self._raster_transform[1]), 4) == round(abs(self._raster_transform[5]), 4), \
             "Raster should have square pixels"
 
-        self.raster_crs_transform = QgsCoordinateTransform(self.points_input_layer.crs(), self.raster_crs(),
+        self.raster_crs_transform = QgsCoordinateTransform(self.feature_input_crs(), self.raster_crs(),
                                                            QgsProject.instance().transformContext())
 
-        output_fields = QgsFields()
-        output_fields.extend(self.points_input_layer.fields())
+        self.output_fields = QgsFields()
+        self.output_fields.extend(self.points_input_layer.fields())
 
         for i in range(self.num_raster_bands()):
-            output_fields.append(QgsField(band_field(i), QVariant.Double))
+            self.output_fields.append(QgsField(band_field(i), QVariant.Double))
 
         dest_id = self.create_sink(
             parameters,
             self.POINTS_WITH_VALUES_OUTPUT,
             context,
-            output_fields,
-            QgsWkbTypes.Point,
-            self.points_input_layer.crs(),
+            QgsWkbTypes.Point
         )
 
         count = 0
         # loop features
         for in_feat in self.feature_input():
-            count = self.process_pin(in_feat, output_fields, count, feedback)
+            count = self.process_pin(in_feat, count, feedback)
 
         return {self.POINTS_WITH_VALUES_OUTPUT: dest_id}
 
-    def process_pin(self, in_feat, output_fields, count, feedback):
+    def process_pin(self, in_feat, count, feedback):
         # skip features with no geometry
         if in_feat.hasGeometry():
             band_vals = self.query_raster(in_feat)
             if band_vals is not None:
-                feature = QgsFeature(output_fields, count)
+                feature = QgsFeature(self.feature_output_fields(), count)
                 for field in in_feat.fields().names():
                     feature.setAttribute(field, in_feat[field])
 
@@ -149,6 +147,9 @@ class QScoutValueGrabberAlgorithm(QScoutFeatureIOAlgorithm, QScoutRasterInterfac
         else:
             feedback.pushInfo("Feature %s has no geometry" % in_feat.id())
         return count
+
+    def feature_input_crs(self):
+        return self.points_input_layer.crs()
 
     def name(self):
         """
@@ -257,6 +258,9 @@ class QScoutValueGrabberAlgorithm(QScoutFeatureIOAlgorithm, QScoutRasterInterfac
 
     def feature_input(self):
         return self.points_input_layer.getFeatures()
+
+    def feature_output_fields(self):
+        return self.output_fields
 
 def band_field(i):
     return "Band_" + str(i+1)

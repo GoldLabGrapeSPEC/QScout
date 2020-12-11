@@ -78,7 +78,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     # parameters for searching for overlay matches
     SEARCH_NUM_ITERATIONS_INPUT = 'SEARCH_NUM_ITERATIONS_INPUT'
     SEARCH_ITERATION_SIZE_INPUT = 'SEARCH_ITERATION_SIZE_INPUT'
-    # output field name
+        # output field name
 
     # testing parameters
     RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
@@ -306,6 +306,13 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             self.raster_crs_transform = QgsCoordinateTransform(self.bound_box_layer.crs(), self.raster_crs(),
                                                                QgsProject.instance().transformContext())
 
+        if self.row_vector_layer.featureCount() < 1:
+            feedback.reportError("Row vector layer must contain a feature - the row vector.")
+            return {}
+        if self.row_vector_layer.featureCount() > 1:
+            feedback.pushInfo("WARNING: Row vector layer/feature source contains more than one feature. "
+                              "This may cause QScout to use the wrong feature, which will cause errors or incorrect"
+                              "results.")
         # convert row vector to the same CRS as the bounding box
         row_vector_geom = list(self.row_vector_layer.getFeatures())[0].geometry()
         if self.row_vector_layer.crs().authid() != self.bound_box_layer.crs().authid():
@@ -323,11 +330,19 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         stop = row_vector[len(row_vector) - 1]
 
         # init bound box
+        if self.bound_box_layer.featureCount() < 1:
+            feedback.reportError("Bounding box layer must contain a feature - the bounding box.")
+            return {}
+        if self.bound_box_layer.featureCount() > 1:
+            feedback.pushInfo("WARNING: Bounding box layer/feature source contains more than one feature. "
+                              "This may cause QScout to use the wrong feature, which will cause errors or incorrect"
+                              "results.")
         self.bound_box = list(self.bound_box_layer.getFeatures())[0].geometry()
+        print(self.bound_box)
         if self.bound_box.isMultipart():
             self.bound_box = self.bound_box.asGeometryCollection()[0]
 
-        assert self.bound_box.contains(row_vector[0]), "Row vector should be within the bounding box."
+        assert self.bound_box.contains(row_vector[0]), "Row vector (%s) should be within the bounding box. Bound box: %s" % (start, self.bound_box)
 
         theta = math.atan2(stop[1] - start[1], stop[0] - start[0])
 
@@ -335,9 +350,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         self.row_h_geo_dy = math.sin(theta + math.pi / 2) * self.row_h
         self.col_w_geo_dx = math.cos(theta) * self.col_w
         self.col_w_geo_dy = math.sin(theta) * self.col_w
-
-        # check that the row vector is within bound box
-        assert not self.near_border((0, 0), *start), "Row vector should be within the bounding box."
 
         # establish root for pin map
         self._root = QScoutPin(0, 0, None, -1)

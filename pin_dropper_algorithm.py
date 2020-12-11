@@ -135,9 +135,9 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
         data, attrs = self.load_input_data(parameters, context)
 
         # set up fields for output layer
-        out_fields = QgsFields()
+        self.out_fields = QgsFields()
         for n, dt in attrs:
-            out_fields.append(QgsField(name=n, type=dt))
+            self.out_fields.append(QgsField(name=n, type=dt))
 
         # Retrieve the feature source and sink. The 'dest_id' variable is used
         # to uniquely identify the feature sink, and must be included in the
@@ -146,9 +146,7 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             parameters,
             self.DROPPED_PINS_OUTPUT,
             context,
-            out_fields,
-            QgsWkbTypes.Point,
-            self.bound_box_layer.crs(),
+            QgsWkbTypes.Point
         )
 
         # read values from source csv file
@@ -330,6 +328,15 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
         feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
         feat.setAttributes(data)
         return self.append_to_feature_output(feat, count)
+
+    def feature_input_crs(self):
+        return self.bound_box_layer.crs()
+
+    def feature_input_fields(self):
+        pass
+
+    def feature_output_fields(self):
+        return self.out_fields
 
     def name(self):
         """

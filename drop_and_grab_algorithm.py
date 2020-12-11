@@ -6,7 +6,7 @@ from .grid_aggregator_algorithm import *
 from .value_grabber_algorithm import QScoutValueGrabberAlgorithm, band_field
 
 
-class DropAndGrabAlgoithm(QScoutPinDropperAlgorithm, QScoutValueGrabberAlgorithm, QScoutGridAggregatorAlgorithm):
+class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
 
     DROP_AND_GRAB_GRID_OUT = 'DROP_AND_GRAB_GRID_OUT'
     DROP_AND_GRAB_POINTS_OUT = 'DROP_AND_GRAB_POINTS_OUT'
@@ -270,102 +270,130 @@ class DropAndGrabAlgoithm(QScoutPinDropperAlgorithm, QScoutValueGrabberAlgorithm
         )
 
 
+    def processAlgorithm(self, parameters, context, feedback):
+        # QSCOUT PARAMETERS
+        # required parameters
+        target_raster = self.parameterAsRasterLayer(parameters, QScoutPinAlgorithm.TARGETING_RASTER_INPUT, context)
+        bound_box_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.BOUND_BOX_INPUT, context)
+        overlay_box_radius = self.parameterAsDouble(parameters, QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT, context)
+        col_w = self.parameterAsDouble(parameters, QScoutPinAlgorithm.POINT_INTERVAL_INPUT, context)
+        row_h = self.parameterAsDouble(parameters, QScoutPinAlgorithm.ROW_SPACING_INPUT, context)
+        row_vector_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.ROW_VECTOR_INPUT, context)
+
+        # optional parameters
+        row_h_stdev = self.parameterAsDouble(parameters, QScoutPinAlgorithm.ROW_SPACING_STDEV_INPUT, context)
+        point_interval_stdev = self.parameterAsDouble(parameters, QScoutPinAlgorithm.POINT_INTERVAL_STDEV_INPUT, context)
+        overlay_match_min_threshold = self.parameterAsDouble(parameters, QScoutPinAlgorithm.OVERLAY_MATCH_THRESHOLD_INPUT,
+                                                                  context)
+        search_iter_count = self.parameterAsInt(parameters, QScoutPinAlgorithm.SEARCH_NUM_ITERATIONS_INPUT, context)
+        search_iter_size = self.parameterAsInt(parameters, QScoutPinAlgorithm.SEARCH_ITERATION_SIZE_INPUT, context)
+        patch_size = self.parameterAsInt(parameters, QScoutPinAlgorithm.PATCH_SIZE_INPUT, context)
+        offset_func_idx = self.parameterAsEnum(parameters, QScoutPinAlgorithm.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
+        compare_from_root = self.parameterAsBool(parameters, QScoutPinAlgorithm.COMPARE_FROM_ROOT_INPUT, context)
+        precision_bias_coeff = self.parameterAsDouble(parameters, QScoutPinAlgorithm.PRECISION_BIAS_COEFFICIENT_INPUT, context)
+
+        start_corner = self.parameterAsEnum(parameters, QScoutPinAlgorithm.START_CORNER_INPUT, context)
+
+        # PIN DROPPER PARAMS
+        data_source = self.parameterAsFile(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT, context)
+        drop_dataless_points = self.parameterAsBool(parameters, QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT, context)
+        fields_to_use = self.parameterAsString(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE, context)
+        panel_size = self.parameterAsInt(parameters, QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT, context)
+
+        pin_dropper_alg_params = {
+            QScoutPinAlgorithm.TARGETING_RASTER_INPUT: target_raster,
+            QScoutPinAlgorithm.BOUND_BOX_INPUT: bound_box_layer,
+            QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT: overlay_box_radius,
+            QScoutPinAlgorithm.POINT_INTERVAL_INPUT: col_w,
+            QScoutPinAlgorithm.ROW_SPACING_INPUT: row_h,
+            QScoutPinAlgorithm.ROW_VECTOR_INPUT: row_vector_layer,
+            QScoutPinAlgorithm.ROW_SPACING_STDEV_INPUT: row_h_stdev,
+            QScoutPinAlgorithm.POINT_INTERVAL_STDEV_INPUT: point_interval_stdev,
+            QScoutPinAlgorithm.OVERLAY_MATCH_THRESHOLD_INPUT: overlay_match_min_threshold,
+            QScoutPinAlgorithm.SEARCH_NUM_ITERATIONS_INPUT: search_iter_count,
+            QScoutPinAlgorithm.SEARCH_ITERATION_SIZE_INPUT: search_iter_size,
+            QScoutPinAlgorithm.PATCH_SIZE_INPUT: patch_size,
+            QScoutPinAlgorithm.RATE_OFFSET_MATCH_FUNCTION_INPUT: offset_func_idx,
+            QScoutPinAlgorithm.COMPARE_FROM_ROOT_INPUT: compare_from_root,
+            QScoutPinAlgorithm.PRECISION_BIAS_COEFFICIENT_INPUT: precision_bias_coeff,
+            QScoutPinAlgorithm.START_CORNER_INPUT: start_corner,
+            QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT: data_source,
+            QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT: drop_dataless_points,
+            QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE: fields_to_use,
+            QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT: panel_size,
+            QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT: "memory:"  # I promise I read this somewhere
+        }
+
+        pin_drop_out = processing.run("QScout:droppins", pin_dropper_alg_params,
+                                      context=context, feedback=feedback, is_child_algorithm=True)
+
+        pin_drop_out = pin_drop_out[QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT]
+
+        vals_raster = self.parameterAsFile(parameters, QScoutValueGrabberAlgorithm.RASTER_INPUT, context)
+
+        # VALUE GRABBER PARAMS
+        grab_alg_params = {
+            QScoutValueGrabberAlgorithm.RASTER_INPUT: vals_raster,
+            QScoutValueGrabberAlgorithm.POINTS_INPUT: pin_drop_out,
+            QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT: parameters[self.DROP_AND_GRAB_POINTS_OUT]
+        }
+
+        points_layer_id = processing.runAndLoadResults("QScout:valuegrab", grab_alg_params,
+                                                    context=context, feedback=feedback)
+        points_layer_id = points_layer_id[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT]
+        points_layer = QgsProject.instance().mapLayer(points_layer_id)
+
+        # GRID AGGREGATOR PARAMS
+        grid_w = self.parameterAsDouble(parameters, QScoutGridAggregatorAlgorithm.GRID_CELL_W_INPUT, context)
+        grid_h = self.parameterAsDouble(parameters, QScoutGridAggregatorAlgorithm.GRID_CELL_H_INPUT, context)
+        ag_idx = self.parameterAsEnum(parameters, QScoutGridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT, context)
+
+        # this is a bit wonky
+        fields_to_use_list = map(lambda f: f.strip(), fields_to_use.split(","))
+        ag_fields_list = points_layer.fields()
+        regexes = "|".join(map(lambda r: "(%s)" % r, [ROW_REGEX, COL_REGEX, VINE_REGEX, PANEL_REGEX]))
+        ag_fields_list = filter(lambda f:
+                           (not fields_to_use or f.name() in fields_to_use_list)
+                           and not re.match(regexes, f.name())
+                           and (f.type() == QVariant.Int or f.type() == QVariant.Double),
+                           ag_fields_list)
+        ag_fields = ",".join(map(lambda f: f.name(), ag_fields_list))
+        # for field in ag_fields_list:
+        #     ag_fields.append(field)
+
+        grid_ag_alg_params = {
+            QScoutValueGrabberAlgorithm.POINTS_INPUT: points_layer,
+            QScoutGridAggregatorAlgorithm.GRID_CELL_W_INPUT: grid_w,
+            QScoutGridAggregatorAlgorithm.GRID_CELL_H_INPUT: grid_h,
+            QScoutGridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT: ag_idx,
+            QScoutGridAggregatorAlgorithm.FIELDS_TO_USE_INPUT: ag_fields,
+            QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT: parameters[self.DROP_AND_GRAB_GRID_OUT]
+        }
+
+        grid_alg_out = processing.runAndLoadResults("QScout:gridaggregator", grid_ag_alg_params,
+                                                    context=context, feedback=feedback)
+
+        ag_layer_id = grid_alg_out[QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT]
+
+        return {self.DROP_AND_GRAB_POINTS_OUT: points_layer_id, self.DROP_AND_GRAB_GRID_OUT: ag_layer_id}
+    #
     # def processAlgorithm(self, parameters, context, feedback):
-    #     # QSCOUT PARAMETERS
-    #     # required parameters
-    #     target_raster = self.parameterAsRasterLayer(parameters, QScoutPinAlgorithm.TARGETING_RASTER_INPUT, context)
-    #     bound_box_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.BOUND_BOX_INPUT, context)
-    #     overlay_box_radius = self.parameterAsDouble(parameters, QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT, context)
-    #     col_w = self.parameterAsDouble(parameters, QScoutPinAlgorithm.POINT_INTERVAL_INPUT, context)
-    #     row_h = self.parameterAsDouble(parameters, QScoutPinAlgorithm.ROW_SPACING_INPUT, context)
-    #     row_vector_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.ROW_VECTOR_INPUT, context)
-    #
-    #     # optional parameters
-    #     row_h_stdev = self.parameterAsDouble(parameters, QScoutPinAlgorithm.ROW_SPACING_STDEV_INPUT, context)
-    #     point_interval_stdev = self.parameterAsDouble(parameters, QScoutPinAlgorithm.POINT_INTERVAL_STDEV_INPUT, context)
-    #     overlay_match_min_threshold = self.parameterAsDouble(parameters, QScoutPinAlgorithm.OVERLAY_MATCH_THRESHOLD_INPUT,
-    #                                                               context)
-    #     search_iter_count = self.parameterAsInt(parameters, QScoutPinAlgorithm.SEARCH_NUM_ITERATIONS_INPUT, context)
-    #     search_iter_size = self.parameterAsInt(parameters, QScoutPinAlgorithm.SEARCH_ITERATION_SIZE_INPUT, context)
-    #     patch_size = self.parameterAsInt(parameters, QScoutPinAlgorithm.PATCH_SIZE_INPUT, context)
-    #     offset_func_idx = self.parameterAsEnum(parameters, QScoutPinAlgorithm.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
-    #     compare_from_root = self.parameterAsBool(parameters, QScoutPinAlgorithm.COMPARE_FROM_ROOT_INPUT, context)
-    #     precision_bias_coeff = self.parameterAsDouble(parameters, QScoutPinAlgorithm.PRECISION_BIAS_COEFFICIENT_INPUT, context)
-    #
-    #     start_corner = self.parameterAsEnum(parameters, QScoutPinAlgorithm.START_CORNER_INPUT, context)
-    #
-    #     # PIN DROPPER PARAMS
-    #     data_source = self.parameterAsFile(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT, context)
-    #     drop_dataless_points = self.parameterAsBool(parameters, QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT, context)
     #     fields_to_use = self.parameterAsString(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE, context)
-    #     panel_size = self.parameterAsInt(parameters, QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT, context)
     #
-    #     pin_dropper_alg_params = {
-    #         QScoutPinAlgorithm.TARGETING_RASTER_INPUT: target_raster,
-    #         QScoutPinAlgorithm.BOUND_BOX_INPUT: bound_box_layer,
-    #         QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT: overlay_box_radius,
-    #         QScoutPinAlgorithm.POINT_INTERVAL_INPUT: col_w,
-    #         QScoutPinAlgorithm.ROW_SPACING_INPUT: row_h,
-    #         QScoutPinAlgorithm.ROW_VECTOR_INPUT: row_vector_layer,
-    #         QScoutPinAlgorithm.ROW_SPACING_STDEV_INPUT: row_h_stdev,
-    #         QScoutPinAlgorithm.POINT_INTERVAL_STDEV_INPUT: point_interval_stdev,
-    #         QScoutPinAlgorithm.OVERLAY_MATCH_THRESHOLD_INPUT: overlay_match_min_threshold,
-    #         QScoutPinAlgorithm.SEARCH_NUM_ITERATIONS_INPUT: search_iter_count,
-    #         QScoutPinAlgorithm.SEARCH_ITERATION_SIZE_INPUT: search_iter_size,
-    #         QScoutPinAlgorithm.PATCH_SIZE_INPUT: patch_size,
-    #         QScoutPinAlgorithm.RATE_OFFSET_MATCH_FUNCTION_INPUT: offset_func_idx,
-    #         QScoutPinAlgorithm.COMPARE_FROM_ROOT_INPUT: compare_from_root,
-    #         QScoutPinAlgorithm.PRECISION_BIAS_COEFFICIENT_INPUT: precision_bias_coeff,
-    #         QScoutPinAlgorithm.START_CORNER_INPUT: start_corner,
-    #         QScoutPinDropperAlgorithm.DATA_SOURCE_INPUT: data_source,
-    #         QScoutPinDropperAlgorithm.DROP_DATALESS_POINTS_INPUT: drop_dataless_points,
-    #         QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE: fields_to_use,
-    #         QScoutPinDropperAlgorithm.PANEL_SIZE_INPUT: panel_size,
-    #         QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT: "memory:"  # I promise I read this somewhere
-    #     }
-    #
-    #     parameters[QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT] = "memory:"
-    #
-    #     pin_drop_out = QScoutPinDropperAlgorithm.processAlgorithm(self, parameters, context, feedback)
-    #     pin_drop_out = pin_drop_out[QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT]
-    #
-    #     vals_raster = self.parameterAsFile(parameters, QScoutValueGrabberAlgorithm.RASTER_INPUT, context)
-    #     val_grab_pins = pin_drop_out[QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT]
-    #
-    #     # VALUE GRABBER PARAMS
-    #     grab_alg_params = {
-    #         QScoutValueGrabberAlgorithm.RASTER_INPUT: vals_raster,
-    #         QScoutValueGrabberAlgorithm.POINTS_INPUT: val_grab_pins,
-    #         QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT: "memory:"
-    #     }
-    #
-    #     parameters[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT] = "memory:"
-    #
-    #     grab_alg_out = QScoutValueGrabberAlgorithm.processAlgorithm(self, parameters, context, feedback)
-    #     grab_alg_out = grab_alg_out[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT]
-    #
-    #     # GRID AGGREGATOR PARAMS
-    #     grid_w = self.parameterAsDouble(parameters, QScoutGridAggregatorAlgorithm.GRID_CELL_W_INPUT, context)
-    #     grid_h = self.parameterAsDouble(parameters, QScoutGridAggregatorAlgorithm.GRID_CELL_H_INPUT, context)
-    #     ag_idx = self.parameterAsEnum(parameters, QScoutGridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT, context)
-    #
-    #     grabbed_points = grab_alg_out[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT]
-    #     points_out, points_out_id = self.parameterAsSink(
-    #         parameters,
-    #         self.DROP_AND_GRAB_POINTS_OUT,
-    #         context,
-    #         fields=grabbed_points.fields(),
-    #         geometryType=QgsWkbTypes.Point,
-    #         crs=grabbed_points.crs(),
-    #         sinkFlags=QgsFeatureSink.RegeneratePrimaryKey
-    #     )
-    #
-    #     for feature in grabbed_points.getFeatures():
-    #         points_out.addFeature(feature)
+    #     # QScoutPinDropperAlgorithm should find input layer correctly
+    #     # set up empty list to buffer output points from QScoutPinDropperAlgorithm
+    #     self.output_sink = []
+    #     self.extra_sink = None
+    #     QScoutPinDropperAlgorithm.processAlgorithm(self, parameters, context, feedback)
+    #     self.input_buffer = self.output_sink  # set output buffer as input for QScoutValueGrabberAlgorithm
+    #     self.output_sink = None  # create a layer this time
+    #     self.extra_sink = []  # to be read by aggregator
+    #     points_out_id = QScoutValueGrabberAlgorithm.processAlgorithm(self, parameters, context, feedback)[self.POINTS_WITH_VALUES_OUTPUT]
     #
     #     # this is a bit wonky
     #     fields_to_use_list = map(lambda f: f.strip(), fields_to_use.split(","))
-    #     ag_fields = grabbed_points.fields()
+    #     # at this point, self.output_sink is the QgsFeatureSink created by QScoutValueGrabberAlgorthm.processAlgorithm
+    #     ag_fields = self.output_sink.fields()
     #     regexes = "|".join(map(lambda r: "(%s)" % r, [ROW_REGEX, COL_REGEX, VINE_REGEX, PANEL_REGEX]))
     #     ag_fields = filter(lambda f:
     #                        (not fields_to_use or f.name() in fields_to_use_list)
@@ -373,89 +401,14 @@ class DropAndGrabAlgoithm(QScoutPinDropperAlgorithm, QScoutValueGrabberAlgorithm
     #                        and (f.type() == QVariant.Int or f.type() == QVariant.Double),
     #                        ag_fields)
     #     ag_fields = map(lambda f: f.name(), ag_fields)
+    #     parameters[QScoutGridAggregatorAlgorithm.FIELDS_TO_USE_INPUT] = ag_fields  # how will grid aggregator actually handle this? we will find out.
     #
-    #     grid_ag_alg_params = {
-    #         QScoutValueGrabberAlgorithm.POINTS_INPUT: grabbed_points,
-    #         QScoutGridAggregatorAlgorithm.GRID_CELL_W_INPUT: grid_w,
-    #         QScoutGridAggregatorAlgorithm.GRID_CELL_H_INPUT: grid_h,
-    #         QScoutGridAggregatorAlgorithm.AGGREGATION_FUNCTION_INPUT: ag_idx,
-    #         QScoutGridAggregatorAlgorithm.FIELDS_TO_USE_INPUT: ag_fields,
-    #         QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT: "memory:"
-    #     }
-    #
-    #     parameters[QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT] = "memory:"
-    #
-    #     grid_alg_out = QScoutGridAggregatorAlgorithm.processAlgorithm(self, parameters, context, feedback)
-    #
-    #     ag_layer = grid_alg_out[QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT]
-    #     grid_out, grid_out_id = self.parameterAsSink(
-    #         parameters,
-    #         self.DROP_AND_GRAB_GRID_OUT,
-    #         context,
-    #         fields=ag_layer.fields(),
-    #         geometryType=QgsWkbTypes.Polygon,
-    #         crs=ag_layer.crs(),
-    #         sinkFlags=QgsFeatureSink.RegeneratePrimaryKey
-    #     )
-    #     for feature in ag_layer.getFeatures():
-    #         grid_out.addFeature(feature)
+    #     self.input_buffer = self.extra_sink
+    #     self.output_sink = None
+    #     self.extra_sink = None  # don't waste memory
+    #     grid_out_id = QScoutGridAggregatorAlgorithm.processAlgorithm(self, parameters, context, feedback)[self.AGGREGATE_GRID_OUTPUT]
     #
     #     return {self.DROP_AND_GRAB_POINTS_OUT: points_out_id, self.DROP_AND_GRAB_GRID_OUT: grid_out_id}
-
-    def processAlgorithm(self, parameters, context, feedback):
-        fields_to_use = self.parameterAsString(parameters, QScoutPinDropperAlgorithm.DATA_SOURCE_FIELDS_TO_USE, context)
-
-        # QScoutPinDropperAlgorithm should find input layer correctly
-        # set up empty list to buffer output points from QScoutPinDropperAlgorithm
-        self.output_sink = []
-        self.extra_sink = None
-        QScoutPinDropperAlgorithm.processAlgorithm(self, parameters, context, feedback)
-        self.input_buffer = self.output_sink  # set output buffer as input for QScoutValueGrabberAlgorithm
-        self.output_sink = None  # create a layer this time
-        self.extra_sink = []  # to be read by aggregator
-        points_out_id = QScoutValueGrabberAlgorithm.processAlgorithm(self, parameters, context, feedback)[self.POINTS_WITH_VALUES_OUTPUT]
-
-        # this is a bit wonky
-        fields_to_use_list = map(lambda f: f.strip(), fields_to_use.split(","))
-        # at this point, self.output_sink is the QgsFeatureSink created by QScoutValueGrabberAlgorthm.processAlgorithm
-        ag_fields = self.output_sink.fields()
-        regexes = "|".join(map(lambda r: "(%s)" % r, [ROW_REGEX, COL_REGEX, VINE_REGEX, PANEL_REGEX]))
-        ag_fields = filter(lambda f:
-                           (not fields_to_use or f.name() in fields_to_use_list)
-                           and not re.match(regexes, f.name())
-                           and (f.type() == QVariant.Int or f.type() == QVariant.Double),
-                           ag_fields)
-        ag_fields = map(lambda f: f.name(), ag_fields)
-        parameters[QScoutGridAggregatorAlgorithm.FIELDS_TO_USE_INPUT] = ag_fields  # how will grid aggregator actually handle this? we will find out.
-
-        self.input_buffer = self.extra_sink
-        self.output_sink = None
-        self.extra_sink = None  # don't waste memory
-        grid_out_id = QScoutGridAggregatorAlgorithm.processAlgorithm(self, parameters, context, feedback)[self.AGGREGATE_GRID_OUTPUT]
-
-        return {self.DROP_AND_GRAB_POINTS_OUT: points_out_id, self.DROP_AND_GRAB_GRID_OUT: grid_out_id}
-
-    def add_pin_to_output(self, pin, data, count):
-        """
-        adds QgsPoint geometry to OUTPUT (feautre sink)
-        @param pin an instance of PinDropperPin for this pin
-        @param data the row of data from the input data for this pin (or generated)
-        @param count the number of features in the sink so far. used for assigning IDs
-        @return count incremented by 1
-        """
-        feat = QgsFeature(id=count)
-        feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(*pin.geoCoords())))
-        feat.setAttributes(data)
-        self.dropped_pin_features.append(feat)
-        return count + 1
-
-    def add_val_grabbed_pin_to_output(self, pin, count):
-        self.val_grabbed_pins.append(pin)
-        self.pin_sink.addFeature(pin)
-        return count + 1
-
-    def pin_feature_source(self):
-        return self.dropped_pin_features
 
     def name(self):
         return "dropandgrab"

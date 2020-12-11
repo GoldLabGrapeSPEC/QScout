@@ -56,33 +56,33 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
 
         # convert row vector to the same CRS as the bounding box
         need_correct_crs = False
-        if self.pin_input_layer.crs().authid() != self.bound_box_layer.crs().authid():
+        if self.pin_input_layer.crs().authid() != self.feature_input_crs().authid():
             need_correct_crs = True
-            coord_transformer = QgsCoordinateTransform(self.pin_input_layer.crs(), self.bound_box_layer.crs(),
+            coord_transformer = QgsCoordinateTransform(self.pin_input_layer.crs(), self.feature_input_crs(),
                                                        QgsProject.instance().transformContext())
 
         points_data_provider = self.pin_input_layer.dataProvider()
+        self.in_fields = points_data_provider.fields()
 
-        new_fields = QgsFields(points_data_provider.fields())
+        self.out_fields = QgsFields(self.feature_input_fields())
 
-        assert new_fields.append(QgsField(name=self.COL_FIELD_NAME, type=QVariant.Int)), \
+        assert self.out_fields.append(QgsField(name=self.COL_FIELD_NAME, type=QVariant.Int)), \
             "Field name %s already in use." % self.COL_FIELD_NAME
-        assert new_fields.append(QgsField(name=self.ROW_FIELD_NAME, type=QVariant.Int)), \
+        assert self.out_fields.append(QgsField(name=self.ROW_FIELD_NAME, type=QVariant.Int)), \
             "Field name %s already in use." % self.ROW_FIELD_NAME
-        assert new_fields.append(QgsField(name=self.OFFSET_FIELD_NAME, type=QVariant.Double)), \
+        assert self.out_fields.append(QgsField(name=self.OFFSET_FIELD_NAME, type=QVariant.Double)), \
             "Field name %s already in use." % self.OFFSET_FIELD_NAME
 
         dest_id = self.create_sink(
             parameters,
             self.INDEXED_POINTS_OUTPUT,
             context,
-            new_fields,
-            QgsWkbTypes.Point,
-            self.bound_box_layer.crs())
+            QgsWkbTypes.Point
+        )
 
-        x_field = new_fields.indexOf(self.COL_FIELD_NAME)
-        y_field = new_fields.indexOf(self.ROW_FIELD_NAME)
-        offset_field = new_fields.indexOf(self.OFFSET_FIELD_NAME)
+        x_field = self.out_fields.indexOf(self.COL_FIELD_NAME)
+        y_field = self.out_fields.indexOf(self.ROW_FIELD_NAME)
+        offset_field = self.out_fields.indexOf(self.OFFSET_FIELD_NAME)
 
         count = 0
         num_feature = points_data_provider.featureCount()
@@ -94,10 +94,10 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             if need_correct_crs:
                 point = coord_transformer.transform(point)
             x, y, distance = self.reverseLocatePoint(point)
-            feature = QgsFeature(new_fields, id=src_feature.id())
+            feature = QgsFeature(self.out_fields, id=src_feature.id())
 
             for f in points_data_provider.fields().names():
-                feature.setAttribute(new_fields.indexOf(f), src_feature[f])
+                feature.setAttribute(self.out_fields.indexOf(f), src_feature[f])
             feature.setAttribute(x_field, int(x))
             feature.setAttribute(y_field, int(y))
             feature.setAttribute(offset_field, float(distance))
@@ -122,7 +122,6 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
                 best_coords = coords
 
         return best_coords[0], best_coords[1], best_distance
-
 
     def name(self):
         """
@@ -166,3 +165,13 @@ class QScoutPinLocatorAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
 
     def feature_input(self):
         return self.pin_input_layer.getFeatures()
+
+    def feature_input_crs(self):
+        return self.bound_box_layer.crs()
+
+    def feature_output_fields(self):
+        return self.out_fields
+
+    def feature_input_fields(self):
+        return self.in_fields
+
