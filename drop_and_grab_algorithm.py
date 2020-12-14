@@ -26,7 +26,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # bounding box
         self.addParameter(
             QgsProcessingParameterFeatureSource(
-                QScoutPinAlgorithm.BOUND_BOX_INPUT,
+                QScoutPinAlgorithm.BOUND_POLYGON_INPUT,
                 self.tr('Bounding Box'),
                 [QgsProcessing.TypeVectorPolygon]
             )
@@ -65,7 +65,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 QScoutPinAlgorithm.ROW_SPACING_INPUT,
                 self.tr('Row Spacing'),
-                parentParameterName=QScoutPinAlgorithm.BOUND_BOX_INPUT,
+                parentParameterName=QScoutPinAlgorithm.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -75,7 +75,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 QScoutPinAlgorithm.POINT_INTERVAL_INPUT,
                 self.tr('Point Interval'),
-                parentParameterName=QScoutPinAlgorithm.BOUND_BOX_INPUT,
+                parentParameterName=QScoutPinAlgorithm.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -232,7 +232,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 QScoutGridAggregatorAlgorithm.GRID_CELL_W_INPUT,
                 self.tr("Grid Cell Width"),
-                parentParameterName=QScoutPinAlgorithm.BOUND_BOX_INPUT,
+                parentParameterName=QScoutPinAlgorithm.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -241,7 +241,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QgsProcessingParameterDistance(
                 QScoutGridAggregatorAlgorithm.GRID_CELL_H_INPUT,
                 self.tr("Grid Cell Height"),
-                parentParameterName=QScoutPinAlgorithm.BOUND_BOX_INPUT,
+                parentParameterName=QScoutPinAlgorithm.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -274,7 +274,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
         # QSCOUT PARAMETERS
         # required parameters
         target_raster = self.parameterAsRasterLayer(parameters, QScoutPinAlgorithm.TARGETING_RASTER_INPUT, context)
-        bound_box_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.BOUND_BOX_INPUT, context)
+        bound_box_layer = self.parameterAsVectorLayer(parameters, QScoutPinAlgorithm.BOUND_POLYGON_INPUT, context)
         overlay_box_radius = self.parameterAsDouble(parameters, QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT, context)
         col_w = self.parameterAsDouble(parameters, QScoutPinAlgorithm.POINT_INTERVAL_INPUT, context)
         row_h = self.parameterAsDouble(parameters, QScoutPinAlgorithm.ROW_SPACING_INPUT, context)
@@ -302,7 +302,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
 
         pin_dropper_alg_params = {
             QScoutPinAlgorithm.TARGETING_RASTER_INPUT: target_raster,
-            QScoutPinAlgorithm.BOUND_BOX_INPUT: bound_box_layer,
+            QScoutPinAlgorithm.BOUND_POLYGON_INPUT: bound_box_layer,
             QScoutPinAlgorithm.OVERLAY_BOX_RADIUS_INPUT: overlay_box_radius,
             QScoutPinAlgorithm.POINT_INTERVAL_INPUT: col_w,
             QScoutPinAlgorithm.ROW_SPACING_INPUT: row_h,

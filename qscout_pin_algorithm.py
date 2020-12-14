@@ -60,7 +60,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
 
     # basics
     TARGETING_RASTER_INPUT = 'TARGETING_RASTER_INPUT'
-    BOUND_BOX_INPUT = 'BOUND_BOX_INPUT'
+    BOUND_POLYGON_INPUT = 'BOUND_BOX_INPUT'
     PATCH_SIZE_INPUT = 'PATCH_SIZE_INPUT'
     START_CORNER_INPUT = 'START_CORNER_INPUT'
 
@@ -100,11 +100,11 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                 optional=True
             )
         )
-        # bounding box
+        # bounding polygon
         self.addParameter(
             QgsProcessingParameterFeatureSource(
-                self.BOUND_BOX_INPUT,
-                self.tr('Bounding Box'),
+                self.BOUND_POLYGON_INPUT,
+                self.tr('Bounding Polygon'),
                 [QgsProcessing.TypeVectorPolygon]
             )
         )
@@ -142,7 +142,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             QgsProcessingParameterDistance(
                 self.ROW_SPACING_INPUT,
                 self.tr('Row Spacing'),
-                parentParameterName=self.BOUND_BOX_INPUT,
+                parentParameterName=self.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -152,7 +152,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             QgsProcessingParameterDistance(
                 self.POINT_INTERVAL_INPUT,
                 self.tr('Point Interval'),
-                parentParameterName=self.BOUND_BOX_INPUT,
+                parentParameterName=self.BOUND_POLYGON_INPUT,
                 minValue=0
             )
         )
@@ -259,7 +259,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     def load_params(self, parameters, context):
         # required parameters
         self.raster = self.parameterAsRasterLayer(parameters, self.TARGETING_RASTER_INPUT, context)
-        self.bound_box_layer = self.parameterAsVectorLayer(parameters, self.BOUND_BOX_INPUT, context)
+        self.bound_box_layer = self.parameterAsVectorLayer(parameters, self.BOUND_POLYGON_INPUT, context)
         self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
         self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
         assert self.col_w > 0, "Point interval must be greater than zero."
@@ -630,7 +630,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
 
     def drop_pin(self, point_candidate):
         '''
-        evaluates a point candidate and drops a pin Dropon it if it's within the bounds of the bounding box
+        evaluates a point candidate and drops a pin Dropon it if it's within the bounds of the bounding polygon
         @param point_candidate an instance of PinDropperPin with a status of STATUS_LOOSE_END
         '''
         parent, relation = point_candidate.parent_relation()
