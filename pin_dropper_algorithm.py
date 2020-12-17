@@ -240,37 +240,47 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
                                                "'number'. Tip: if your data has a column for panels, you need to " \
                                                "specify the panel size."
 
-
             self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, ROW_REGEX)
+            if fields_to_use.strip():
+                if self.input_row_attr_name not in fields_to_use_list:
+                    attrs = attrs + [(self.input_row_attr_name, np.dtype(np.int16))]
+                if self.input_col_attr_name not in fields_to_use_list and panel_size == 0:
+                    attrs = attrs + [(self.input_col_attr_name, np.dtype(np.int16))]
             assert self.row_attr_idx > -1, "No column in the attached file can be identified as 'row'"
-
-            # make array for processed data
-            data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
 
             # grab grid dimensions
             x_mins, x_maxs, y_mins, y_maxs = self.calc_grid_dimensions()
 
             if panel_size > 0:
-                # grab panel stuff
-
+                # grab panel stuf
                 panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, PANEL_REGEX)
                 assert panel_attr_idx > -1, "No column in the attached file can ve identified as 'panel'"
                 # grab vine/plant stuff
 
                 vine_attr_name, vine_attr_idx = match_index(input_data.dtype.names, VINE_REGEX)
                 assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
-                # process panel/plant data
-                # TODO: implement negative value processing like for row and col inputs?
-                data[self.input_col_attr_name] = panel_size * input_data[panel_attr_name] + input_data[vine_attr_name]
+
             else:
                 negative_cols = input_data[self.input_col_attr_name] < 0
                 # select x input data with negative values and process
                 x_data_neg = x_maxs[input_data[self.input_row_attr_name][negative_cols].astype(np.int_)] +\
                              input_data[self.input_col_attr_name][negative_cols]
+
+            # make array for processed data
+            data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
+
+
+
+            if panel_size > 0:
+                # process panel/plant data
+                # TODO: implement negative value processing like for row and col inputs?
+                data[self.input_col_attr_name] = panel_size * input_data[panel_attr_name] + input_data[vine_attr_name]
+            else:
                 # put processed x negative input data in data array
                 data[self.input_col_attr_name][negative_cols] = x_data_neg
                 # put normal input data in data array
-                data[self.input_col_attr_name][negative_cols == False] = input_data[self.input_col_attr_name][negative_cols == False]
+                data[self.input_col_attr_name][negative_cols == False] = input_data[self.input_col_attr_name][
+                    negative_cols == False]
 
             # deal with row data, which is easier
             y_max = np.amax(y_maxs)
