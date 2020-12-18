@@ -1,9 +1,9 @@
 <p>The QScout suite is a collection of interacting QGIS Processing plugins for georeferencing and analyzing field 
 scouting data. The plugins are run within QGIS on imported scouting data. QGIS is a Geographic Information Systems program similar to ArcGIS. 
 <ul>
-<li>The <b>Pin Dropper</b> plugin takes data from a spreadsheet and puts them on a map.</li>
-<li>The <b>Pin Locator</b> plugin takes data on a map and gives them more numbers so you can understand where they are in relation to the map.</li>
-<li>The <b>Value Grabber</b> plugin takes data on a map and adds data from another map.</li>
+<li>The <b>Pin Dropper</b> plugin takes data from a spreadsheet and puts them on a crop field.</li>
+<li>The <b>Pin Locator</b> plugin takes data from a crop field and gives row and column coordinates within the field so you can understand where they are in relation to the map.</li>
+<li>The <b>Value Grabber</b> plugin takes data on a map in the form of points, and attaches pixel values from a raster file to them.</li>
 <li>The <b>Grid Aggregator</b> plugin takes data on a map and groups them together so you can do math on it more easily.</li>
 </ul>
 <p>In this documentation, parameter names are in <i>italics</i>, and code is in <code>monospaced typewriter font</code>.</p> 
