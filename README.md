@@ -1,5 +1,5 @@
 <p>The QScout suite is a collection of interacting QGIS Processing plugins for georeferencing and analyzing field 
-scouting data. QGIS is a Geographic Information Systems program similar to ArcGIS. 
+scouting data. The plugins are run within QGIS on imported scouting data. QGIS is a Geographic Information Systems program similar to ArcGIS. 
 <ul>
 <li>The <b>Pin Dropper</b> plugin takes data from a spreadsheet and puts them on a map.</li>
 <li>The <b>Pin Locator</b> plugin takes data on a map and gives them more numbers so you can understand where they are in relation to the map.</li>
