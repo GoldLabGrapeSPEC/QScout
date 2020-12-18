@@ -324,6 +324,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QScoutPinDropperAlgorithm.DROPPED_PINS_OUTPUT: "memory:"  # I promise I read this somewhere
         }
 
+        # this processing algorithm produces a vector layer of pin geometry type
         pin_drop_out = processing.run("QScout:droppins", pin_dropper_alg_params,
                                       context=context, feedback=feedback, is_child_algorithm=True)
 
@@ -338,6 +339,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT: parameters[self.DROP_AND_GRAB_POINTS_OUT]
         }
 
+        # this processing algorithm produces a vector layer of pin geometry type
         points_layer_id = processing.runAndLoadResults("QScout:valuegrab", grab_alg_params,
                                                     context=context, feedback=feedback)
         points_layer_id = points_layer_id[QScoutValueGrabberAlgorithm.POINTS_WITH_VALUES_OUTPUT]
@@ -370,6 +372,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             QScoutGridAggregatorAlgorithm.AGGREGATE_GRID_OUTPUT: parameters[self.DROP_AND_GRAB_GRID_OUT]
         }
 
+        # this plugin produces a vector layer of polygon geometry type
         grid_alg_out = processing.runAndLoadResults("QScout:gridaggregator", grid_ag_alg_params,
                                                     context=context, feedback=feedback)
 
