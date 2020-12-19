@@ -362,7 +362,7 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
                            and not re.match(regexes, f.name())
                            and (f.type() == QVariant.Int or f.type() == QVariant.Double),
                            ag_fields_list)
-        ag_fields = ",".join(map(lambda f: f.name(), ag_fields_list))
+        ag_fields = ";".join(map(lambda f: f.name(), ag_fields_list))
         # for field in ag_fields_list:
         #     ag_fields.append(field)
 

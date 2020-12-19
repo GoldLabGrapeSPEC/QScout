@@ -338,7 +338,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                               "This may cause QScout to use the wrong feature, which will cause errors or incorrect"
                               "results.")
         self.bound_box = list(self.bound_box_layer.getFeatures())[0].geometry()
-        print(self.bound_box)
         if self.bound_box.isMultipart():
             self.bound_box = self.bound_box.asGeometryCollection()[0]
 
