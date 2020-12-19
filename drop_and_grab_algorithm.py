@@ -269,6 +269,9 @@ class DropAndGrabAlgoithm(QgsProcessingAlgorithm):
             )
         )
 
+    def flags(self):
+        return super(DropAndGrabAlgoithm, self).flags() | QgsProcessingAlgorithm.FlagNoThreading
+
 
     def processAlgorithm(self, parameters, context, feedback):
         # QSCOUT PARAMETERS

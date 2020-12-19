@@ -11,8 +11,7 @@ scouting data. The plugins are run within QGIS on imported scouting data. QGIS i
 
 <h1>Drop Pins / Locate Pins in Field</h1>
 <h2>Abstract</h2>
-<p>Drop Pins (Processing: <code>qscout:droppins</code>) is a plugin for georeferencing field data with a particular focus on vinyards. The plugin can also be
-used to drop points on a field if no data is available.</p>
+<p>Drop Pins (Processing: <code>qscout:droppins</code>) is a plugin for georeferencing field data with a particular focus on vinyards. The plugin can also be used to drop points on a field if no data is available.</p>
 <p>Locate Pins in Field (Processing: <code>qscout:locatepinsinfield</code>) effectively does the opposite of Drop Pins. Given a vector layer of points, the plugin will produce a copy of the layer with row and plant numbers added.</p>
 <p>These two algorithms largely use the same parameters so are grouped together.</p>
 <h2>Usage Guide</h2>
