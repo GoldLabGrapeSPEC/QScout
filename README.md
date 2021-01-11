@@ -75,7 +75,7 @@ All these functions were developed by me. I'd be very interested to see what an 
 <b>Solution:</b> The first step is to check that your lines all have the same number of values. The <code>.csv</code> file can be opened in a text editor. Every row should have the same number of values, seperated by commas. If that doesn't work, check if your column headers have any special characters, such as "$", "#", "%", and remove those characters if you find them. If that doesn't solve the problem, email me. 
 <br>
 <b>Problem:</b> "Empty data values from some columns in my input csv file are set to -1 as attributes."<br>
-<b>Solution:</b> In your spreadsheet software, set any value in the column causing the problem to a decimal, e.g. <code>10<code> becomes <code>10.0</code>. You don't need to do this for every value in the column, just one.<br>
+<b>Solution:</b> In your spreadsheet software, set any value in the column causing the problem to a decimal, e.g. <code>10</code> becomes <code>10.0</code>. You don't need to do this for every value in the column, just one.<br>
 <br>
 Let me know if you have any more questions, which will then become 'frequently asked'
 
