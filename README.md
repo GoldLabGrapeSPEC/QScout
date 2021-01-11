@@ -71,10 +71,12 @@ All these functions were developed by me. I'd be very interested to see what an 
 <b>Problem:</b> "My (1,1) point isn't in the correct corner."<br>
 <b>Solution:</b> You may have drawn the row vector in the opposite direction from what you meant. The row vector points left to right towards what would be 3:00 on a clock face. To fix this problem, you can either redraw the row vector or imagine that the entire map is rotated by 180 degrees. <br>
 <br>
-<b>Problem:</b> "Error message reading 'ValueError: some errors were detected!' followed by a series of messages reading something akin to 'Line #<i>x</i> (got <i>y</i> columns instead of <i>z</i>)'."
+<b>Problem:</b> "Error message reading 'ValueError: some errors were detected!' followed by a series of messages reading something akin to 'Line #<i>x</i> (got <i>y</i> columns instead of <i>z</i>)'."<br>
 <b>Solution:</b> The first step is to check that your lines all have the same number of values. The <code>.csv</code> file can be opened in a text editor. Every row should have the same number of values, seperated by commas. If that doesn't work, check if your column headers have any special characters, such as "$", "#", "%", and remove those characters if you find them. If that doesn't solve the problem, email me. 
 <br>
-
+<b>Problem:</b> "Empty data values from some columns in my input csv file are set to -1 as attributes."<br>
+<b>Solution:</b> In your spreadsheet software, set any value in the column causing the problem to a decimal, e.g. <code>10<code> becomes <code>10.0</code>. You don't need to do this for every value in the column, just one.<br>
+<br>
 Let me know if you have any more questions, which will then become 'frequently asked'
 
 
