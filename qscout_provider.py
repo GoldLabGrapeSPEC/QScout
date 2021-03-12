@@ -34,7 +34,8 @@ from qgis.core import QgsProcessingProvider
 from .pin_dropper_algorithm import QScoutPinDropperAlgorithm
 from .pin_locator_algorithm import QScoutPinLocatorAlgorithm
 from .grid_aggregator_algorithm import QScoutGridAggregatorAlgorithm
-from .drop_and_grab_algorithm import DropAndGrabAlgoithm
+from .drop_grab_aggregate_algorithm import QScoutDropGrabAggregateAlgoithm
+from .locate_grab_aggregate_algorithm import QScoutLocateGrabAggregateAlgorithm
 from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 
 class QScoutProvider(QgsProcessingProvider):
@@ -60,7 +61,8 @@ class QScoutProvider(QgsProcessingProvider):
         self.addAlgorithm(QScoutPinLocatorAlgorithm())
         self.addAlgorithm(QScoutGridAggregatorAlgorithm())
         self.addAlgorithm(QScoutValueGrabberAlgorithm())
-        self.addAlgorithm(DropAndGrabAlgoithm())
+        self.addAlgorithm(QScoutDropGrabAggregateAlgoithm())
+        self.addAlgorithm(QScoutLocateGrabAggregateAlgorithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())
 

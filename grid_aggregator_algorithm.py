@@ -3,15 +3,13 @@ from importlib.util import spec_from_file_location, module_from_spec
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from PyQt5.QtCore import QCoreApplication, QVariant
-from qgis.core import (QgsProcessingAlgorithm,
-                       QgsProcessingParameterFeatureSource,
+from qgis.core import (QgsProcessingParameterFeatureSource,
                        QgsProcessing,
                        QgsProcessingParameterDistance,
                        QgsProcessingParameterDefinition,
                        QgsProcessingParameterFile,
                        QgsProcessingParameterFeatureSink,
                        QgsRectangle,
-                       QgsFeatureSink,
                        QgsWkbTypes,
                        QgsFields,
                        QgsField,
@@ -22,7 +20,6 @@ from qgis.core import (QgsProcessingAlgorithm,
                        QgsPointXY,
                        QgsProcessingParameterExtent,
                        QgsCoordinateTransform,
-                       QgsCoordinateTransformContext,
                        QgsProject)
 
 import numpy as np
@@ -30,6 +27,8 @@ import numpy as np
 from math import ceil, floor
 from .value_grabber_algorithm import QScoutValueGrabberAlgorithm
 from .qscout_feature_io_algorithm import QScoutFeatureIOAlgorithm
+
+ALLOWED_TYPES = [QVariant.Int, QVariant.Double, QVariant.LongLong, QVariant.UInt, QVariant.ULongLong]
 
 FIELD_CONVERTS = {
     QVariant.Double: float,
@@ -104,7 +103,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                 self.FIELDS_TO_USE_INPUT,
                 self.tr("Fields to Use"),
                 parentLayerParameterName=QScoutValueGrabberAlgorithm.POINTS_INPUT,
-                allowMultiple=True,
+                allowMultiple=True
             )
         )
 
@@ -159,7 +158,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
             input_fields = [f.name() for f in self.points_input_layer.fields()]
         for field in self.points_input_layer.fields():
             if field.name() in fields_to_use:
-                assert field.type() == QVariant.Double or field.type() == QVariant.Int or aggregation_class is None, \
+                assert field.type() in ALLOWED_TYPES or aggregation_class is None, \
                     "Wrong dtype %s. Only int or double field types are supported." % field.typeName()
                 # allow aggregators for non-numeric data types if using a custom aggregation class
                 for return_val_name, return_val_dtype in aggregator.return_vals():
@@ -180,7 +179,9 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                 x = int((point.x() - xstart) / grid_w)
                 y = int((point.y() - ystart) / grid_h)
                 if (x, y) in grid_cells:
-                    grid_cells[(x, y)].add_point(point, {f: feature[f] for f in input_fields})
+                    vals_dict = {f: (feature[f].value() if not QVariant.isNull(feature[f]) else np.NAN) if isinstance(feature[f], QVariant)
+                                                       else feature[f] for f in input_fields}
+                    grid_cells[(x, y)].add_point(point, vals_dict)
                 else:
                     feedback.pushInfo("(%s, %s) outside bounds." % (point.x(), point.y()))
             else:
@@ -213,7 +214,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
 
         for x in range(ceil(bounds.width() / grid_w) + 1):
             for y in range(ceil(bounds.height() / grid_h) + 1):
-                grid_cells[(x, y)] = QScoutGridAggregatorAlgorithm.GridGrabberCell(
+                grid_cells[(x, y)] = QScoutGridAggregatorAlgorithm.GridAggregatorCell(
                     xstart + (x * grid_w),
                     ystart + (y * grid_h),
                     xstart + ((x + 1) * grid_w),
@@ -274,7 +275,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
     def feature_output_fields(self):
         return self.output_fields
 
-    class GridGrabberCell:
+    class GridAggregatorCell:
         def __init__(self, xmin, ymin, xmax, ymax, attr_count):
             self.rect = QgsRectangle(xmin, ymin, xmax, ymax)
             self._attr_count = attr_count
@@ -351,7 +352,7 @@ class QScoutAggregationFunctionMean(QScoutAggregationFunction):
         return [("Mean_", QVariant.Double)]
 
     def aggregate(self, cell):
-        data = np.mean(cell.attrs_as_array(), axis=1)
+        data = np.nanmean(cell.attrs_as_array(), axis=1)
         return [float(d) for d in data]
 
 
@@ -360,7 +361,7 @@ class QScoutAggregationFunctionMedian(QScoutAggregationFunction):
         return [("Median_", QVariant.Double)]
 
     def aggregate(self, cell):
-        data = np.median(cell.attrs_as_array(), axis=1)
+        data = np.nanmedian(cell.attrs_as_array(), axis=1)
         return [float(d) for d in data]
 
 
@@ -369,7 +370,7 @@ class QScoutAggregationFunctionSum(QScoutAggregationFunction):
         return [("Total", None)]
 
     def aggregate(self, cell):
-        data = np.sum(cell.attrs_as_array(), axis=1)
+        data = np.nansum(cell.attrs_as_array(), axis=1)
         return [float(d) for d in data]
 
 
@@ -378,7 +379,7 @@ class QScoutAggregationFunctionStdev(QScoutAggregationFunction):
         return [("Stdev_", QVariant.Double)]
 
     def aggregate(self, cell):
-        data = np.std(cell.attrs_as_array(), axis=1)
+        data = np.nanstd(cell.attrs_as_array(), axis=1)
         return [float(d) for d in data]
 
 class QScoutAggregationFunctionMinMax(QScoutAggregationFunction):
