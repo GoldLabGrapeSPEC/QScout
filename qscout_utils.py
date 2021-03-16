@@ -1,5 +1,6 @@
 from PyQt5.QtCore import QVariant
 import numpy as np
+import math
 
 DIRECTION_RIGHT = 0
 DIRECTION_UP = 1
@@ -22,7 +23,9 @@ DTYPE_CONVERSIONS = {
             'u': (QVariant.Int, int),
             'f': (QVariant.Double, float),
             'U': (QVariant.String, str),
-            'S': (QVariant.String, lambda x: x.decode("UTF-8"))
+            'S': (QVariant.String, lambda x: x.decode("UTF-8")),
+            'O': (QVariant.String, str),
+            'M': (QVariant.String, str) # I don't even know what this is
         }
 
 def calc_margins(sample1, sample2):

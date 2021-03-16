@@ -43,7 +43,7 @@ from qgis.core import (
 
 from .qscout_pin_algorithm import *
 from .qscout_feature_io_algorithm import QScoutFeatureIOAlgorithm
-
+import pandas as pd
 PANEL_REGEX = ".?[Pp]anel.?"
 COL_REGEX = "([_\-\w]?[Cc]ol.?)|([Nn]umber.?)"  # TODO: improve regex
 ROW_REGEX = "[_\-\w]?[Rr]ow"  # TODO: improve regex
@@ -174,13 +174,13 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
         already_dropped = []
         # first loop. add points from input data
         if data is not None:
-            for entry in data:
+            for idx, entry in data.iterrows():
                 coords = (entry[self.input_col_attr_name], entry[self.input_row_attr_name])
                 if coords in self._defined_points:
                     pin = self[coords]
                     # do conversions. qgis uses gdal, which is *VERY* finicky about fata types. gotta make sure
                     # data types are Python types, not numpy types.
-                    vals = [DTYPE_CONVERSIONS[data.dtype[i].kind][1](entry[i]) for i in range(len(data.dtype))]
+                    vals = [DTYPE_CONVERSIONS[data.dtypes[i].kind][1](entry[i]) for i in range(len(data.dtypes))]
                     # add pin
                     count = self.add_pin_to_output(pin, vals, count)
                     # flag as dropped
@@ -216,31 +216,38 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             fields_to_use_list = list(map(lambda x: x.strip(), fields_to_use.rsplit(',')))
 
         if self.data_source.strip():  # empty strings are "falsey" so if there is text, this will be true
+            panel_size = self.parameterAsInt(parameters, self.PANEL_SIZE_INPUT, context)
+
             # may raise exceptions. may have to improve descriptiveness of errors
-            input_data = np.genfromtxt(self.data_source, delimiter=',', names=True, dtype=None)
+            if self.data_source.endswith(".csv"):
+                input_data = pd.read_csv(self.data_source, index_col=False)
+
+            elif self.data_source.endswith(".xls") or self.data_source.endswith(".xlsx"):
+                input_data = pd.read_excel(self.data_source, index_col=False, engine="openpyxl")
+            else:
+                assert False, "File format of %s not supported." % self.data_source
 
             # read input data analysis parameters
-            panel_size = self.parameterAsInt(parameters, self.PANEL_SIZE_INPUT, context)
 
             # assemble attrs array from hell
             # 'array' is a list of tuples of name, dtype and is filtered through fields_to_use
-            attrs = [(input_data.dtype.names[i], input_data.dtype[i])
-                             for i in range(len(input_data.dtype))
-                             if ((not fields_to_use.strip()) or input_data.dtype.names[i] in fields_to_use_list)]
+            attrs = [(col, dt) for col, dt in zip(input_data.columns, input_data.dtypes)
+                     if ((not fields_to_use.strip()) or col in fields_to_use_list) and not col.startswith("Unnamed")]
             # have to set up panel size here
             if panel_size > 0:
                 # dtype not a huge deal here because it'll get set again a few lines down
                 attrs = attrs + [(COL_NAME, np.dtype(np.int16))]
                 self.input_col_attr_name = COL_NAME
                 self.col_attr_idx = len(attrs) - 1
+                input_data = input_data.assign(**{COL_NAME: np.zeros(input_data.shape[0])})
             else:
                 # look for column or number
-                self.input_col_attr_name, self.col_attr_idx = match_index(input_data.dtype.names, COL_REGEX)
+                self.input_col_attr_name, self.col_attr_idx = match_index(input_data.columns, COL_REGEX)
                 assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or " \
                                                "'number'. Tip: if your data has a column for panels, you need to " \
                                                "specify the panel size."
 
-            self.input_row_attr_name, self.row_attr_idx = match_index(input_data.dtype.names, ROW_REGEX)
+            self.input_row_attr_name, self.row_attr_idx = match_index(input_data.columns, ROW_REGEX)
             if fields_to_use.strip():
                 if self.input_row_attr_name not in fields_to_use_list:
                     attrs = attrs + [(self.input_row_attr_name, np.dtype(np.int16))]
@@ -253,57 +260,66 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
 
             if panel_size > 0:
                 # grab panel stuf
-                panel_attr_name, panel_attr_idx = match_index(input_data.dtype.names, PANEL_REGEX)
+                panel_attr_name, panel_attr_idx = match_index(input_data.columns, PANEL_REGEX)
                 assert panel_attr_idx > -1, "No column in the attached file can ve identified as 'panel'"
                 # grab vine/plant stuff
 
-                vine_attr_name, vine_attr_idx = match_index(input_data.dtype.names, VINE_REGEX)
+                vine_attr_name, vine_attr_idx = match_index(input_data.columns, VINE_REGEX)
                 assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
 
+                negative_cols = input_data[panel_attr_name] < 0
             else:
                 negative_cols = input_data[self.input_col_attr_name] < 0
-                # select x input data with negative values and process
-                x_data_neg = x_maxs[input_data[self.input_row_attr_name][negative_cols].astype(np.int_)] +\
-                             input_data[self.input_col_attr_name][negative_cols]
 
-            # make array for processed data
-            data = np.full(shape=input_data.shape, dtype=np.dtype(attrs), fill_value=np.nan)
+            negative_cols = negative_cols.values
 
-
+            try:
+                row_maxs = x_maxs[input_data[self.input_row_attr_name].astype(np.int_) - 1]
+            except IndexError as e:
+                assert False, "Some of your rows are more than the number of rows calculated to occur in the area you specified. " \
+                              "Did you get your units right for row width and height?"
 
             if panel_size > 0:
                 # process panel/plant data
-                # TODO: implement negative value processing like for row and col inputs?
-                data[self.input_col_attr_name] = panel_size * input_data[panel_attr_name] + input_data[vine_attr_name]
+                # add panel col, because it will be negative, but subtract vine attr col, since it will be positive
+                x_data_neg = row_maxs[negative_cols] + panel_size * (input_data[panel_attr_name].iloc[negative_cols]+1) - input_data[vine_attr_name].iloc[negative_cols] + 1 # account for an off-by-one error
+                x_data_pos = panel_size * (input_data[panel_attr_name].iloc[negative_cols == False] - 1) + input_data[vine_attr_name].iloc[negative_cols == False]
             else:
-                # put processed x negative input data in data array
-                data[self.input_col_attr_name][negative_cols] = x_data_neg
-                # put normal input data in data array
-                data[self.input_col_attr_name][negative_cols == False] = input_data[self.input_col_attr_name][
-                    negative_cols == False]
+                # select x input data with negative values and process
+                x_data_neg = row_maxs[negative_cols] + input_data[self.input_col_attr_name].iloc[negative_cols]
+                x_data_pos = input_data[self.input_col_attr_name].iloc[negative_cols == False] + 1 # account for an off-by-one error
+
+            # put processed x negative input data in data array
+            input_data[self.input_col_attr_name].iloc[negative_cols] = x_data_neg
+            # put normal input data in data array
+            input_data[self.input_col_attr_name].iloc[negative_cols == False] = x_data_pos
+
 
             # deal with row data, which is easier
             y_max = np.amax(y_maxs)
-            negative_rows = input_data[self.input_row_attr_name] < 0
-            data[self.input_row_attr_name][negative_rows] = y_max + input_data[self.input_row_attr_name][negative_rows]
-            data[self.input_row_attr_name][negative_rows == False] = input_data[self.input_row_attr_name][negative_rows == False]
+            negative_rows = (input_data[self.input_row_attr_name] < 0).values
+            negative_row_data = y_max + input_data[self.input_row_attr_name].iloc[negative_rows]
+            positive_row_data = input_data[self.input_row_attr_name].iloc[negative_rows == False]
+            input_data[self.input_row_attr_name].iloc[negative_rows] = negative_row_data
+            input_data[self.input_row_attr_name].iloc[negative_rows == False] = positive_row_data
 
             # better way to do this than for-loop? IDK. using the _idx values breaks if not using all fields
-            for i in range(len(attrs)):
-                name, dt = attrs[i]
-                if name == self.input_row_attr_name or name == self.input_col_attr_name:
-                    attrs[i] = (name, np.dtype(np.int_))
-                    # assign indexes so they can be right when they're used to assign values in processAlgorithm
-                    if name == self.input_col_attr_name:
-                        self.col_attr_idx = i
-                    else:
-                        self.row_attr_idx = i
+            # for i in range(len(attrs)):
+            #     name, dt = attrs[i]
+            #     if name == self.input_row_attr_name or name == self.input_col_attr_name:
+            #         attrs[i] = (name, np.dtype(np.int_))
+            #         # assign indexes so they can be right when they're used to assign values in processAlgorithm
+            #         if name == self.input_col_attr_name:
+            #             self.col_attr_idx = i
+            #         else:
+            #             self.row_attr_idx = i
 
             # put the rest of the input data in the processed data array
-            for dt_name, _ in attrs:
-                if dt_name == self.input_col_attr_name or dt_name == self.input_col_attr_name:
-                    continue
-                data[dt_name] = input_data[dt_name]
+            # for dt_name, _ in attrs:
+            #     if dt_name == self.input_col_attr_name or dt_name == self.input_col_attr_name:
+            #         continue
+            #     data[dt_name] = input_data[dt_name]
+            data = input_data[[attr[0] for attr in attrs]]
 
         else:  # if no input data was provided
             data = None
