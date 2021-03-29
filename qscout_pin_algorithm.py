@@ -23,12 +23,10 @@ from qgis.core import (QgsProcessingAlgorithm,
 from .qscout_utils import *
 from .raster_plugin import QScoutRasterInterface
 
-from . import match_functions # import package, not specifics
+from . import match_functions  # import package, not specifics
 
 ROW_NAME = 'row'
 COL_NAME = 'col'
-
-
 
 MATCH_FUNCTIONS = {"Regular": None, **match_functions.MATCH_FUNCTIONS}
 
@@ -38,7 +36,6 @@ START_CORNERS = [
     "Top Left",
     "Top Right"
 ]
-
 
 class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     def __init__(self, *args, **kwargs):
@@ -51,11 +48,12 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         self.row_h_geo_dy = 0
         self.col_w_geo_dx = 0
         self.col_w_geo_dy = 0
-        self.col_w_stdev = .05
-        self.row_h_stdev = .05
-        self.overlay_box_radius = 0
         self.coords_mins = None
         self.coords_maxs = None
+        # targeting params - RIP
+        # self.col_w_stdev = .05
+        # self.row_h_stdev = .05
+        # self.overlay_box_radius = 0
     # PARAMETERS
 
     # basics
@@ -90,15 +88,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         with some other properties.
         """
 
-        # raster layer. repeating pattern in the raster will be used to drop pins
-        self.addParameter(
-            QgsProcessingParameterRasterLayer(
-                self.TARGETING_RASTER_INPUT,
-                self.tr('Raster Layer'),
-                [QgsProcessing.TypeRaster],
-                optional=True
-            )
-        )
         # bounding polygon
         self.addParameter(
             QgsProcessingParameterFeatureSource(
@@ -116,25 +105,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                 [QgsProcessing.TypeVectorLine],
             )
         )
-
-        # rating function
-        param = QgsProcessingParameterEnum(
-            self.RATE_OFFSET_MATCH_FUNCTION_INPUT,
-            self.tr("Rate Offset Match Function"),
-            options=MATCH_FUNCTIONS,
-            defaultValue=0  # nothing I write here makes any difference
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # whether to compare from root
-        param = QgsProcessingParameterBoolean(
-            self.COMPARE_FROM_ROOT_INPUT,
-            self.tr("Compare from Root"),
-            defaultValue=False
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
 
         # row height
         self.addParameter(
@@ -156,29 +126,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             )
         )
 
-        # overlay box radius
-        param = QgsProcessingParameterNumber(
-            self.OVERLAY_BOX_RADIUS_INPUT,
-            self.tr('Overlay Box Radius'),
-            type=QgsProcessingParameterNumber.Double,
-            minValue=0.0001,
-            defaultValue=.5
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # match threshold
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.OVERLAY_MATCH_THRESHOLD_INPUT,
-                self.tr("Match Threshold"),
-                type=QgsProcessingParameterNumber.Double,
-                minValue=0,
-                maxValue=1,
-                defaultValue=.85,  # this number has absolutely no scientific or mathematical basis
-            )
-        )
-
+        # start corner
         self.addParameter(
             QgsProcessingParameterEnum(
                 self.START_CORNER_INPUT,
@@ -188,109 +136,162 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             )
         )
 
-        # patch size
-        param = QgsProcessingParameterNumber(
-            self.PATCH_SIZE_INPUT,
-            self.tr('Maximum Patch Size'),
-            type=QgsProcessingParameterNumber.Integer,
-            minValue=0,
-            defaultValue=2
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # optional parameters
-        param = QgsProcessingParameterDistance(
-            self.ROW_SPACING_STDEV_INPUT,
-            self.tr('Row Spacing Stdev'),
-            parentParameterName=self.BOUND_POLYGON_INPUT,
-            minValue=0,
-            optional=True
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # patch size
-        param = QgsProcessingParameterDistance(
-            self.POINT_INTERVAL_STDEV_INPUT,
-            self.tr('Point Interval Stdev'),
-            parentParameterName=self.BOUND_POLYGON_INPUT,
-            minValue=0,
-            optional=True
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # search iteration size
-        param = QgsProcessingParameterNumber(
-            self.SEARCH_ITERATION_SIZE_INPUT,
-            self.tr("Search Iteration Size"),
-            type=QgsProcessingParameterNumber.Integer,
-            minValue=2,
-            defaultValue=5
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # number of search iterations
-        param = QgsProcessingParameterNumber(
-            self.SEARCH_NUM_ITERATIONS_INPUT,
-            self.tr("Number of Search Iterations"),
-            type=QgsProcessingParameterNumber.Integer,
-            minValue=1,
-            defaultValue=2
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
-
-        # precision bias coefficient
-        param = QgsProcessingParameterNumber(
-            self.PRECISION_BIAS_COEFFICIENT_INPUT,
-            self.tr("Precision Bias Coefficient"),
-            type=QgsProcessingParameterNumber.Double,
-            minValue=0,
-            defaultValue=0
-
-        )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
-        self.addParameter(param)
+        # # TARGETING PARAMETERS - RIP -----------------------------------------------------
+        # # raster layer. repeating pattern in the raster will be used to drop pins
+        # self.addParameter(
+        #     QgsProcessingParameterRasterLayer(
+        #         self.TARGETING_RASTER_INPUT,
+        #         self.tr('Raster Layer'),
+        #         [QgsProcessing.TypeRaster],
+        #         optional=True
+        #     )
+        # )
+        #
+        # # rating function
+        # param = QgsProcessingParameterEnum(
+        #     self.RATE_OFFSET_MATCH_FUNCTION_INPUT,
+        #     self.tr("Rate Offset Match Function"),
+        #     options=MATCH_FUNCTIONS,
+        #     defaultValue=0  # nothing I write here makes any difference
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # whether to compare from root
+        # param = QgsProcessingParameterBoolean(
+        #     self.COMPARE_FROM_ROOT_INPUT,
+        #     self.tr("Compare from Root"),
+        #     defaultValue=False
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # overlay box radius
+        # param = QgsProcessingParameterNumber(
+        #     self.OVERLAY_BOX_RADIUS_INPUT,
+        #     self.tr('Overlay Box Radius'),
+        #     type=QgsProcessingParameterNumber.Double,
+        #     minValue=0.0001,
+        #     defaultValue=.5
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # match threshold
+        # self.addParameter(
+        #     QgsProcessingParameterNumber(
+        #         self.OVERLAY_MATCH_THRESHOLD_INPUT,
+        #         self.tr("Match Threshold"),
+        #         type=QgsProcessingParameterNumber.Double,
+        #         minValue=0,
+        #         maxValue=1,
+        #         defaultValue=.85,  # this number has absolutely no scientific or mathematical basis
+        #     )
+        # )
+        #
+        # # patch size
+        # param = QgsProcessingParameterNumber(
+        #     self.PATCH_SIZE_INPUT,
+        #     self.tr('Maximum Patch Size'),
+        #     type=QgsProcessingParameterNumber.Integer,
+        #     minValue=0,
+        #     defaultValue=2
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # optional parameters
+        # param = QgsProcessingParameterDistance(
+        #     self.ROW_SPACING_STDEV_INPUT,
+        #     self.tr('Row Spacing Stdev'),
+        #     parentParameterName=self.BOUND_POLYGON_INPUT,
+        #     minValue=0,
+        #     optional=True
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # patch size
+        # param = QgsProcessingParameterDistance(
+        #     self.POINT_INTERVAL_STDEV_INPUT,
+        #     self.tr('Point Interval Stdev'),
+        #     parentParameterName=self.BOUND_POLYGON_INPUT,
+        #     minValue=0,
+        #     optional=True
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # search iteration size
+        # param = QgsProcessingParameterNumber(
+        #     self.SEARCH_ITERATION_SIZE_INPUT,
+        #     self.tr("Search Iteration Size"),
+        #     type=QgsProcessingParameterNumber.Integer,
+        #     minValue=2,
+        #     defaultValue=5
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # number of search iterations
+        # param = QgsProcessingParameterNumber(
+        #     self.SEARCH_NUM_ITERATIONS_INPUT,
+        #     self.tr("Number of Search Iterations"),
+        #     type=QgsProcessingParameterNumber.Integer,
+        #     minValue=1,
+        #     defaultValue=2
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
+        #
+        # # precision bias coefficient
+        # param = QgsProcessingParameterNumber(
+        #     self.PRECISION_BIAS_COEFFICIENT_INPUT,
+        #     self.tr("Precision Bias Coefficient"),
+        #     type=QgsProcessingParameterNumber.Double,
+        #     minValue=0,
+        #     defaultValue=0
+        #
+        # )
+        # param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        # self.addParameter(param)
 
     def load_params(self, parameters, context):
         # required parameters
-        self.raster = self.parameterAsRasterLayer(parameters, self.TARGETING_RASTER_INPUT, context)
         self.bound_box_layer = self.parameterAsVectorLayer(parameters, self.BOUND_POLYGON_INPUT, context)
-        self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
         self.col_w = self.parameterAsDouble(parameters, self.POINT_INTERVAL_INPUT, context)
         assert self.col_w > 0, "Point interval must be greater than zero."
         self.row_h = self.parameterAsDouble(parameters, self.ROW_SPACING_INPUT, context)
         assert self.row_h > 0, "Row spacing must be greater than zero."
         self.row_vector_layer = self.parameterAsVectorLayer(parameters, self.ROW_VECTOR_INPUT, context)
-        # self.ignore_raster = self.parameterAsBoolean(parameters, self.IGNORE_RASTER_INPUT, context)
-
-        # optional parameters
-        row_h_stdev = self.parameterAsDouble(parameters, self.ROW_SPACING_STDEV_INPUT, context)
-        point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
-        self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_INPUT,
-                                                                  context)
-        self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
-        self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
-        self.patch_size = self.parameterAsInt(parameters, self.PATCH_SIZE_INPUT, context)
-        offset_func_idx = self.parameterAsEnum(parameters, self.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
-        self.rate_offset_match = list(MATCH_FUNCTIONS.values())[offset_func_idx]
-        self.compare_from_root = self.parameterAsBool(parameters, self.COMPARE_FROM_ROOT_INPUT, context)
-        self.precision_bias_coeff = self.parameterAsDouble(parameters, self.PRECISION_BIAS_COEFFICIENT_INPUT, context)
 
         self.start_corner = self.parameterAsEnum(parameters, self.START_CORNER_INPUT, context)
 
-        assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
+        # optional parameters
+        # targeting parameters - RIP
+        # self.overlay_box_radius = self.parameterAsDouble(parameters, self.OVERLAY_BOX_RADIUS_INPUT, context)
+        # self.raster = self.parameterAsRasterLayer(parameters, self.TARGETING_RASTER_INPUT, context)
+        # row_h_stdev = self.parameterAsDouble(parameters, self.ROW_SPACING_STDEV_INPUT, context)
+        # point_interval_stdev = self.parameterAsDouble(parameters, self.POINT_INTERVAL_STDEV_INPUT, context)
+        # self.overlay_match_min_threshold = self.parameterAsDouble(parameters, self.OVERLAY_MATCH_THRESHOLD_INPUT,
+        #                                                           context)
+        # self.search_iter_count = self.parameterAsInt(parameters, self.SEARCH_NUM_ITERATIONS_INPUT, context) - 1
+        # self.search_iter_size = self.parameterAsInt(parameters, self.SEARCH_ITERATION_SIZE_INPUT, context)
+        # self.patch_size = self.parameterAsInt(parameters, self.PATCH_SIZE_INPUT, context)
+        # offset_func_idx = self.parameterAsEnum(parameters, self.RATE_OFFSET_MATCH_FUNCTION_INPUT, context)
+        # self.rate_offset_match = list(MATCH_FUNCTIONS.values())[offset_func_idx]
+        # self.compare_from_root = self.parameterAsBool(parameters, self.COMPARE_FROM_ROOT_INPUT, context)
+        # self.precision_bias_coeff = self.parameterAsDouble(parameters, self.PRECISION_BIAS_COEFFICIENT_INPUT, context)
 
-        assert self.raster is not None or self.rate_offset_match is None, "All rate functions except 'Regular' require" \
-                                                                          "a raster layer."
-
-        if row_h_stdev > 0:
-            self.row_h_stdev = row_h_stdev / self.row_h
-        if point_interval_stdev > 0:
-            self.col_w_stdev = point_interval_stdev / self.col_w
+        # assert self.search_iter_size % 2 == 1, "Search iteration size should be odd to include search centerpoint."
+        #
+        # assert self.raster is not None or self.rate_offset_match is None, "All rate functions except 'Regular' require" \
+        #                                                                   "a raster layer."
+        # if row_h_stdev > 0:
+        #     self.row_h_stdev = row_h_stdev / self.row_h
+        # if point_interval_stdev > 0:
+        #     self.col_w_stdev = point_interval_stdev / self.col_w
+        self.rate_offset_match = None
 
     def processAlgorithm(self, parameters, context, feedback):
         # declare algorithm parameters, mainly just so we have them all in on place
@@ -298,7 +299,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         # read parameters
         self.load_params(parameters, context)
 
-        if self.rate_offset_match is not None:
+        if self.rate_offset_match is not None: # will always be False now - RIP
             self.load_raster_data(self.raster.dataProvider().dataSourceUri())
             self.raster_crs_transform = QgsCoordinateTransform(self.bound_box_layer.crs(), self.raster_crs(),
                                                                QgsProject.instance().transformContext())
@@ -351,7 +352,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         self._root = QScoutPin(0, 0, None, -1)
         self._loose_ends = {}
         self.drop_pin_at(self._root, *start)
-        if self.rate_offset_match is not None:
+        if self.rate_offset_match is not None: # will always be False now - RIP
             # sample start location
             self._root_sample = QScoutPinAlgorithm.Sample(*self._root.geoCoords(), self)
             assert self._root_sample.a is not None, "Entire root sample outside bounds despite not being near edge." \
@@ -385,9 +386,9 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             feedback.setProgress(int(100 * self.population() / approx_total_calcs))
             feedback.setProgressText("%d / ~%d" % (self.population(), approx_total_calcs))
 
-        # if the user has cancelled the process, stop everything else
-        if feedback.isCanceled():
-            return {self.OUTPUT: None}
+            # if the user has cancelled the process, stop everything else
+            if feedback.isCanceled():
+                return {self.OUTPUT: None}
 
         # patch holes
         if self.is_do_patches():
@@ -429,12 +430,12 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                 self[coords].merge_with_loose_end(self._loose_ends[coords])
                 self._loose_ends.pop(coords)
 
-        self.refresh_mins_maxs() # ???
+        self.refresh_mins_maxs()  # ???
 
     def patch_holes(self):
         """
         finds "holes" and patches them
-
+        3/29/2021: not currently called due to targeting death - RIP
         """
         all_dropped_coords = self.points_as_array()
 
@@ -464,6 +465,9 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         """
         patches a hole by predicting location based on nearest neighbors
         this is hard to explain
+
+        as of 3/29/2021, removed along with the rest of targeting
+
         """
         coords = tuple(coords)  # will often be passed a np array
         assert coords not in self._defined_points
@@ -647,7 +651,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                 return False
             else:
                 # if there's no rate function, geo coords are set to whatever we just predicted
-                if self.rate_offset_match is None:
+                if self.rate_offset_match is None: # will always be true now that targeting is dead - RIP
                     self.drop_pin_at(point_candidate, approx_geo_x, approx_geo_y)
                     return True
                 else:
@@ -656,7 +660,7 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                         QScoutPinAlgorithm.Sample(parent.geoX(), parent.geoY(), self)
                     # I *REALLY* hope no one ever triggers this assertion
                     assert target.a is not None, "*panicked screaming*\n*breathes*\ncan't sample %s, %s." % \
-                                                 (parent.geoX(), parent.geoY())
+                                                 (parent.geoX(), parent.geoY())  # this assertion may not be terribly helpful
                     # perform search function
                     point, rating = self.search(target, approx_geo_x, approx_geo_y)
                     # if rating is good, assign coords
@@ -691,7 +695,8 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         )  # avoid adding multiple loose ends for the same x,y pair
 
     def is_do_patches(self):
-        return self.patch_size > 0
+        # return self.patch_size > 0
+        return False # patching dead as part of targeting - RIP
 
     def near_border(self, point, x, y):
         """

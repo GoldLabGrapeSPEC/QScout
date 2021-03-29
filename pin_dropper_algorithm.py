@@ -83,7 +83,6 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             self.tr("Fields to Use"),
             optional=True
         )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
         # panel size
@@ -93,7 +92,6 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             minValue=0,
             defaultValue=0
         )
-        param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
 
         # drop data-less points
@@ -280,7 +278,7 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
                               "Did you get your units right for row width and height?"
             except ValueError as e:
                 if self.data_source.endswith(".xls") or self.data_source.endswith(".xlsx"):
-                    assert False, "Indexing error. This is probably caused by an issue with your excel file. Try exporting your data" \
+                    assert False, "Indexing error. This is probably caused by an issue with your excel file. Try exporting your data " \
                                   "as a .csv and running the plugin again."
                 else:
                     assert False, "Data type error. Please contact me."
