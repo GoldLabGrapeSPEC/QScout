@@ -243,7 +243,7 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             else:
                 # look for column or number
                 self.input_col_attr_name, self.col_attr_idx = match_index(input_data.columns, COL_REGEX)
-                assert self.col_attr_idx > -1, "No column in the attached file can ve identified as 'column' or " \
+                assert self.col_attr_idx > -1, "No column in the attached file can be identified as 'column' or " \
                                                "'number'. Tip: if your data has a column for panels, you need to " \
                                                "specify the panel size."
 
@@ -261,11 +261,11 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             if panel_size > 0:
                 # grab panel stuf
                 panel_attr_name, panel_attr_idx = match_index(input_data.columns, PANEL_REGEX)
-                assert panel_attr_idx > -1, "No column in the attached file can ve identified as 'panel'"
+                assert panel_attr_idx > -1, "No column in the attached file can be identified as 'panel'"
                 # grab vine/plant stuff
 
                 vine_attr_name, vine_attr_idx = match_index(input_data.columns, VINE_REGEX)
-                assert vine_attr_idx > -1, "No column in the attached file can ve identified as 'vine' or 'plant"
+                assert vine_attr_idx > -1, "No column in the attached file can be identified as 'vine' or 'plant"
 
                 negative_cols = input_data[panel_attr_name] < 0
             else:
@@ -278,6 +278,13 @@ class QScoutPinDropperAlgorithm(QScoutPinAlgorithm, QScoutFeatureIOAlgorithm):
             except IndexError as e:
                 assert False, "Some of your rows are more than the number of rows calculated to occur in the area you specified. " \
                               "Did you get your units right for row width and height?"
+            except ValueError as e:
+                if self.data_source.endswith(".xls") or self.data_source.endswith(".xlsx"):
+                    assert False, "Indexing error. This is probably caused by an issue with your excel file. Try exporting your data" \
+                                  "as a .csv and running the plugin again."
+                else:
+                    assert False, "Data type error. Please contact me."
+
 
             if panel_size > 0:
                 # process panel/plant data

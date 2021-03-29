@@ -8,12 +8,7 @@ def rate_offset_match_gradients(context, target, compare):
     the most ambitious of my comparison algorithms. attempts to compare the... for lack of a better word,
     derivitives of the two samples.
     """
-    clip = np.s_[:, :, :]
-    # it's highly unlikely that two samples with the same shape but different margins will be compared
-    if target.shape() != compare.shape():
-        t_m, c_m = context.calc_margins(target, compare)
-    else:
-        t_m = c_m = np.s_[:, :, :]
+    clip, t_m, c_m = context.calc_margins_clip(target, compare)
     a1 = target.gradients(t_m)
     a2 = compare.gradients(c_m)
     if a1.shape != a2.shape:
@@ -97,7 +92,7 @@ def rate_offset_match_random(context, target, compare):
     compatibility
     """
 
-    return random.random() * (math.pow(context.search_iter_size, 2) / context.overlay_match_min_threshold)
+    return random() * (math.pow(context.search_iter_size, 2) / context.overlay_match_min_threshold)
 
 
 MATCH_FUNCTIONS = {

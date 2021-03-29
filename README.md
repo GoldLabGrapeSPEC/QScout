@@ -94,6 +94,7 @@ fall within the borders. The grid will be oriented along the axes of the CRS of 
 <li><i>Fields to Use</i> (Processing: <code>FIELDS_TO_USE_INPUT</code>): The fields to aggregate in the grid. Each field will be seperately aggregated.</li>
 <li><i>Aggregation Function</i> (Processing: <code>AGGREGATION_FUNCTION_INPUT</code>): The function to use to aggregate the values into the grid. Most of the options are likely self-explainatory but a detailed description can be found in the Advanced Use Guide.</li>
 <li><i>Aggregate Grid</i> (Processing: <code>AGGREGATE_GRID_OUTPUT</code>): The output file or layer where the grid will be created.</li>
+<li><i>File Output</i> (Processing: <code>FILE_OUTPUT</code>): An Excel (.xlsx) file name to write data to (optional, does not interfere with creation of grid geometry).</li>
 </ul>
 <h3>Advanced Parameters</h3>
 <ul>

@@ -78,7 +78,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
     # parameters for searching for overlay matches
     SEARCH_NUM_ITERATIONS_INPUT = 'SEARCH_NUM_ITERATIONS_INPUT'
     SEARCH_ITERATION_SIZE_INPUT = 'SEARCH_ITERATION_SIZE_INPUT'
-        # output field name
 
     # testing parameters
     RATE_OFFSET_MATCH_FUNCTION_INPUT = 'RATE_OFFSET_MATCH_FUNCTION_INPUT'
@@ -161,9 +160,9 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         param = QgsProcessingParameterNumber(
             self.OVERLAY_BOX_RADIUS_INPUT,
             self.tr('Overlay Box Radius'),
-            type=QgsProcessingParameterNumber.Integer,
-            minValue=0,
-            defaultValue=2
+            type=QgsProcessingParameterNumber.Double,
+            minValue=0.0001,
+            defaultValue=.5
         )
         param.setFlags(param.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
         self.addParameter(param)
@@ -201,10 +200,10 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         self.addParameter(param)
 
         # optional parameters
-        param = QgsProcessingParameterNumber(
+        param = QgsProcessingParameterDistance(
             self.ROW_SPACING_STDEV_INPUT,
             self.tr('Row Spacing Stdev'),
-            type=QgsProcessingParameterNumber.Double,
+            parentParameterName=self.BOUND_POLYGON_INPUT,
             minValue=0,
             optional=True
         )
@@ -212,10 +211,10 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
         self.addParameter(param)
 
         # patch size
-        param = QgsProcessingParameterNumber(
+        param = QgsProcessingParameterDistance(
             self.POINT_INTERVAL_STDEV_INPUT,
             self.tr('Point Interval Stdev'),
-            type=QgsProcessingParameterNumber.Double,
+            parentParameterName=self.BOUND_POLYGON_INPUT,
             minValue=0,
             optional=True
         )
@@ -287,8 +286,6 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
 
         assert self.raster is not None or self.rate_offset_match is None, "All rate functions except 'Regular' require" \
                                                                           "a raster layer."
-
-        self.overlay_box_radius += .5
 
         if row_h_stdev > 0:
             self.row_h_stdev = row_h_stdev / self.row_h
@@ -725,10 +722,10 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
             self.geo_center = geo_center
             # row_idx_coords = index within row, so x
             w_rad = idx_radius * context.col_w_stdev
-            self.row_idx_coords = np.arange(-w_rad, w_rad, 2 * w_rad / context.search_iter_size)
+            self.row_idx_coords = np.linspace(-w_rad, w_rad, context.search_iter_size)
             # col_idx_coords = index within a column, so y
             h_rad = idx_radius * context.row_h_stdev
-            self.col_idx_coords = np.arange(-h_rad, h_rad, 2 * h_rad / context.search_iter_size)
+            self.col_idx_coords = np.linspace(-h_rad, h_rad, context.search_iter_size)
             self.x_geo_coords = geo_center[
                                     0] + self.row_idx_coords * context.col_w_geo_dx + self.col_idx_coords * context.row_h_geo_dx
             self.y_geo_coords = geo_center[
@@ -794,8 +791,10 @@ class QScoutPinAlgorithm(QgsProcessingAlgorithm, QScoutRasterInterface):
                 best_coords = (geo_x, geo_y)
 
         if best_coords is None or iters == 0:
+            # if algorithm was unable to find any satisfactory coords or algorithm is done subsearching, return results
             return best_coords, best_match
         else:
+            # otherwise, DEPLOY THE RECURSION
             return self.search_area(target, search_box.subsearch(best_coords, 2, self), ignore_search_box,
                                     iters - 1)
 

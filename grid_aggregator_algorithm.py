@@ -20,8 +20,10 @@ from qgis.core import (QgsProcessingParameterFeatureSource,
                        QgsPointXY,
                        QgsProcessingParameterExtent,
                        QgsCoordinateTransform,
-                       QgsProject)
+                       QgsProject,
+                       QgsProcessingParameterFileDestination)
 
+import pandas as pd
 import numpy as np
 
 from math import ceil, floor
@@ -33,7 +35,10 @@ ALLOWED_TYPES = [QVariant.Int, QVariant.Double, QVariant.LongLong, QVariant.UInt
 FIELD_CONVERTS = {
     QVariant.Double: float,
     QVariant.Int: int,
-    QVariant.String: str
+    QVariant.String: str,
+    QVariant.LongLong: int,
+    QVariant.ULongLong: int,
+    QVariant.UInt: int
 }
 
 
@@ -45,6 +50,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
     CUSTOM_AGGREGATION_FUNCTION_INPUT = 'CUSTOM_AGGREGATION_FUNCTION_INPUT'
     GRID_EXTENT_INPUT = 'GRID_EXTENT_INPUT'
     AGGREGATE_GRID_OUTPUT = 'GRID_OUTPUT'
+    FILE_OUTPUT = 'FILE_OUTPUT'
 
     def initAlgorithm(self, config):
         self.addParameter(
@@ -114,6 +120,15 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
             )
         )
 
+        self.addParameter(
+            QgsProcessingParameterFileDestination(
+                self.FILE_OUTPUT,
+                self.tr("File Output"),
+                optional=True,
+                fileFilter="Excel Files (*.xlsx)"
+            )
+        )
+
     def processAlgorithm(self, parameters, context, feedback):
         """
 
@@ -124,6 +139,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
         fields_to_use = self.parameterAsFields(parameters, self.FIELDS_TO_USE_INPUT, context)
         ag_idx = self.parameterAsEnum(parameters, self.AGGREGATION_FUNCTION_INPUT, context)
         bounds = self.parameterAsExtent(parameters, self.GRID_EXTENT_INPUT, context)
+        file_out = self.parameterAsFileOutput(parameters, self.FILE_OUTPUT, context)
 
         if bounds is None or bounds.area() == 0:
             # if the user didn't provide an extent, use the extent of the points layer
@@ -172,8 +188,14 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
 
         xstart = floor(bounds.xMinimum())
         ystart = floor(bounds.yMinimum())
+        df_w = ceil(bounds.width() / grid_w) + 1
+        df_h = ceil(bounds.height() / grid_h) + 1
+        fprogress = 0
+        ftotal = self.points_input_layer.featureCount() + (df_w * df_h)
 
         for feature in self.feature_input():
+            if feedback.isCanceled():
+                return {self.AGGREGATE_GRID_OUTPUT: None, self.FILE_OUTPUT: None}
             if feature.hasGeometry() and feature.geometry() is not None:
                 point = feature.geometry().asPoint()
                 x = int((point.x() - xstart) / grid_w)
@@ -186,6 +208,8 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                     feedback.pushInfo("(%s, %s) outside bounds." % (point.x(), point.y()))
             else:
                 feedback.pushInfo("Feature %s has no geometry. Skipping." % feature.id())
+            fprogress += 1
+            feedback.setProgress(100 * int(fprogress / ftotal))
 
         dest_id = self.create_sink(
             parameters,
@@ -195,16 +219,44 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
         )
 
         count = 0
-        for cell_coords in grid_cells:
+
+        grid_arrs = [np.full(shape=(df_h, df_w), fill_value=np.nan, dtype=np.dtype(FIELD_CONVERTS[f.type()])) for f in self.output_fields]
+        grid_arrs.append(np.full(shape=(df_h, df_w), dtype=np.int_, fill_value=0))
+
+        for x, y in grid_cells:
+            if feedback.isCanceled():
+                return {self.AGGREGATE_GRID_OUTPUT: None, self.FILE_OUTPUT:None}
+            cell_coords = (x, y)
             cell = grid_cells[cell_coords]
             feature = QgsFeature(count)
             feature.setGeometry(QgsGeometry.fromRect(cell.rect))
             cell_values = aggregator.aggregate(cell)
+            for i, v in enumerate(cell_values):
+                grid_arrs[i][y, x] = v
+            grid_arrs[len(cell_values)][y, x] = cell.point_count()
             assert len(cell_values) == self.feature_output_fields().size()
             feature.setAttributes(cell_values)
             count = self.append_to_feature_output(feature, count)
 
-        return {self.AGGREGATE_GRID_OUTPUT: dest_id}
+            fprogress += 1
+            feedback.setProgress(100 * int(fprogress / ftotal))
+
+        grid_arrs = [np.flipud(a) for a in grid_arrs]
+
+        if file_out:
+            try:
+                with pd.ExcelWriter(file_out, engine="openpyxl") as fout:
+                    for i, field in enumerate(self.output_fields):
+                        df = pd.DataFrame(grid_arrs[i])
+                        df.to_excel(fout, sheet_name=field.name(), header=False, index=False)
+                    df = pd.DataFrame(grid_arrs[len(self.output_fields)])
+                    df.to_excel(fout, sheet_name="Point Count", header=False, index=False)
+            except FileNotFoundError as e:
+                fout = None
+        else:
+            fout = None
+            feedback.pushWarning("File path '%s' invalid." % file_out)
+        return {self.AGGREGATE_GRID_OUTPUT: dest_id, self.FILE_OUTPUT: fout}
 
     def setup_grid(self, bounds, grid_w, grid_h):
         grid_cells = {}
