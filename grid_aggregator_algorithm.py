@@ -125,7 +125,7 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
                 self.FILE_OUTPUT,
                 self.tr("File Output"),
                 optional=True,
-                fileFilter="Excel Files (*.xlsx)"
+                fileFilter="Excel Files (*.xlsx), CSV files (*.csv)"
             )
         )
 
@@ -220,9 +220,11 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
 
         count = 0
 
-        grid_arrs = [np.full(shape=(df_h, df_w), fill_value=np.nan, dtype=np.dtype(FIELD_CONVERTS[f.type()])) for f in self.output_fields]
-        grid_arrs.append(np.full(shape=(df_h, df_w), dtype=np.int_, fill_value=0))
-
+        if file_out:
+            grid_frame = pd.DataFrame(index=range(len(grid_cells)),
+                                      columns=["x", "y"] + [f.name() for f in self.output_fields] + ["Point Count"],
+                                      dtype=np.float32)
+            i = 0
         for x, y in grid_cells:
             if feedback.isCanceled():
                 return {self.AGGREGATE_GRID_OUTPUT: None, self.FILE_OUTPUT:None}
@@ -231,28 +233,26 @@ class QScoutGridAggregatorAlgorithm(QScoutFeatureIOAlgorithm):
             feature = QgsFeature(count)
             feature.setGeometry(QgsGeometry.fromRect(cell.rect))
             cell_values = aggregator.aggregate(cell)
-            for i, v in enumerate(cell_values):
-                grid_arrs[i][y, x] = v
-            grid_arrs[len(cell_values)][y, x] = cell.point_count()
+            if file_out:
+                centroid = cell.rect.center()
+                grid_frame.iloc[i]["x"] = centroid.x()
+                grid_frame.iloc[i]["y"] = centroid.y()
+                grid_frame.iloc[i]["Point Count"] = cell.point_count()
+                grid_frame.iloc[i][[f.name() for f in self.output_fields]] = cell_values
+                i += 1
             assert len(cell_values) == self.feature_output_fields().size()
             feature.setAttributes(cell_values)
             count = self.append_to_feature_output(feature, count)
-
             fprogress += 1
             feedback.setProgress(100 * int(fprogress / ftotal))
 
-        grid_arrs = [np.flipud(a) for a in grid_arrs]
-
         if file_out:
-            try:
-                with pd.ExcelWriter(file_out, engine="openpyxl") as fout:
-                    for i, field in enumerate(self.output_fields):
-                        df = pd.DataFrame(grid_arrs[i])
-                        df.to_excel(fout, sheet_name=field.name(), header=False, index=False)
-                    df = pd.DataFrame(grid_arrs[len(self.output_fields)])
-                    df.to_excel(fout, sheet_name="Point Count", header=False, index=False)
-            except FileNotFoundError as e:
-                fout = None
+            if file_out.endswith(".xlsx"):
+                grid_frame.to_excel(file_out, index=False)
+            else:
+                grid_frame.to_csv(file_out, index=False)
+            with open(file_out) as fout:
+                pass # make and close file io object
         else:
             fout = None
             feedback.pushWarning("File path '%s' invalid." % file_out)
